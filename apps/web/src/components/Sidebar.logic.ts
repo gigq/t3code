@@ -34,6 +34,12 @@ export interface ThreadStatusPill {
   pulse: boolean;
 }
 
+export interface ThreadGitIndicator {
+  kind: "dirty" | "worktree";
+  colorClass: string;
+  tooltip: string;
+}
+
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,
@@ -327,6 +333,33 @@ export function resolveProjectStatusIndicator(
   return highestPriorityStatus;
 }
 
+export function resolveThreadGitIndicators(input: {
+  hasWorkingTreeChanges: boolean;
+  worktreePath: string | null;
+}): ThreadGitIndicator[] {
+  const indicators: ThreadGitIndicator[] = [];
+
+  if (input.worktreePath !== null) {
+    indicators.push({
+      kind: "worktree",
+      colorClass: "text-sky-600 dark:text-sky-300/90",
+      tooltip: "Thread is using a git worktree",
+    });
+  }
+
+  if (input.hasWorkingTreeChanges) {
+    indicators.push({
+      kind: "dirty",
+      colorClass: "text-amber-600 dark:text-amber-300/90",
+      tooltip:
+        input.worktreePath !== null
+          ? "Worktree has uncommitted changes"
+          : "Repository has uncommitted changes",
+    });
+  }
+
+  return indicators;
+}
 export function getVisibleThreadsForProject(input: {
   threads: readonly Thread[];
   activeThreadId: Thread["id"] | undefined;

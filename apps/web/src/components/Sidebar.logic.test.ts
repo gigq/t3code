@@ -11,6 +11,7 @@ import {
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
+  resolveThreadGitIndicators,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -485,6 +486,67 @@ describe("resolveProjectStatusIndicator", () => {
         },
       ]),
     ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+  });
+});
+
+describe("resolveThreadGitIndicators", () => {
+  it("returns no indicators for a clean main checkout", () => {
+    expect(
+      resolveThreadGitIndicators({
+        hasWorkingTreeChanges: false,
+        worktreePath: null,
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns a worktree indicator for a clean worktree", () => {
+    expect(
+      resolveThreadGitIndicators({
+        hasWorkingTreeChanges: false,
+        worktreePath: "/tmp/project-worktree",
+      }),
+    ).toEqual([
+      {
+        kind: "worktree",
+        colorClass: "text-sky-600 dark:text-sky-300/90",
+        tooltip: "Thread is using a git worktree",
+      },
+    ]);
+  });
+
+  it("returns a dirty indicator for the main checkout", () => {
+    expect(
+      resolveThreadGitIndicators({
+        hasWorkingTreeChanges: true,
+        worktreePath: null,
+      }),
+    ).toEqual([
+      {
+        kind: "dirty",
+        colorClass: "text-amber-600 dark:text-amber-300/90",
+        tooltip: "Repository has uncommitted changes",
+      },
+    ]);
+  });
+
+  it("returns both indicators for a dirty worktree", () => {
+    expect(
+      resolveThreadGitIndicators({
+        hasWorkingTreeChanges: true,
+        worktreePath: "/tmp/project-worktree",
+      }),
+    ).toEqual([
+      {
+        kind: "worktree",
+        colorClass: "text-sky-600 dark:text-sky-300/90",
+        tooltip: "Thread is using a git worktree",
+      },
+      {
+        kind: "dirty",
+        colorClass: "text-amber-600 dark:text-amber-300/90",
+        tooltip: "Worktree has uncommitted changes",
+      },
+    ]);
   });
 });
 

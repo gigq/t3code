@@ -2,8 +2,9 @@ import {
   ArchiveIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
+  FileDiffIcon,
   FolderIcon,
-  GitPullRequestIcon,
+  GitForkIcon,
   PlusIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -112,6 +113,7 @@ import {
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
+  resolveThreadGitIndicators,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -143,15 +145,6 @@ interface TerminalStatusIndicator {
   colorClass: string;
   pulse: boolean;
 }
-
-interface PrStatusIndicator {
-  label: "PR open" | "PR closed" | "PR merged";
-  colorClass: string;
-  tooltip: string;
-  url: string;
-}
-
-type ThreadPr = GitStatusResult["pr"];
 
 function ThreadStatusLabel({
   status,
@@ -202,36 +195,6 @@ function terminalStatusFromRunningIds(
     colorClass: "text-teal-600 dark:text-teal-300/90",
     pulse: true,
   };
-}
-
-function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
-  if (!pr) return null;
-
-  if (pr.state === "open") {
-    return {
-      label: "PR open",
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      tooltip: `#${pr.number} PR open: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  if (pr.state === "closed") {
-    return {
-      label: "PR closed",
-      colorClass: "text-zinc-500 dark:text-zinc-400/80",
-      tooltip: `#${pr.number} PR closed: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  if (pr.state === "merged") {
-    return {
-      label: "PR merged",
-      colorClass: "text-violet-600 dark:text-violet-300/90",
-      tooltip: `#${pr.number} PR merged: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  return null;
 }
 
 function T3Wordmark() {
@@ -462,7 +425,7 @@ export default function Sidebar() {
       refetchInterval: 60_000,
     })),
   });
-  const prByThreadId = useMemo(() => {
+  const gitStatusByThreadId = useMemo(() => {
     const statusByCwd = new Map<string, GitStatusResult>();
     for (let index = 0; index < threadGitStatusCwds.length; index += 1) {
       const cwd = threadGitStatusCwds[index];
@@ -473,37 +436,15 @@ export default function Sidebar() {
       }
     }
 
-    const map = new Map<ThreadId, ThreadPr>();
+    const map = new Map<ThreadId, GitStatusResult | null>();
     for (const target of threadGitTargets) {
       const status = target.cwd ? statusByCwd.get(target.cwd) : undefined;
       const branchMatches =
         target.branch !== null && status?.branch !== null && status?.branch === target.branch;
-      map.set(target.threadId, branchMatches ? (status?.pr ?? null) : null);
+      map.set(target.threadId, branchMatches ? (status ?? null) : null);
     }
     return map;
   }, [threadGitStatusCwds, threadGitStatusQueries, threadGitTargets]);
-
-  const openPrLink = useCallback((event: React.MouseEvent<HTMLElement>, prUrl: string) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const api = readNativeApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Link opening is unavailable.",
-      });
-      return;
-    }
-
-    void api.shell.openExternal(prUrl).catch((error) => {
-      toastManager.add({
-        type: "error",
-        title: "Unable to open PR link",
-        description: error instanceof Error ? error.message : "An error occurred.",
-      });
-    });
-  }, []);
 
   const attemptArchiveThread = useCallback(
     async (threadId: ThreadId) => {
@@ -1268,7 +1209,10 @@ export default function Sidebar() {
       const isThreadRunning =
         thread.session?.status === "running" && thread.session.activeTurnId != null;
       const threadStatus = threadStatuses.get(thread.id) ?? null;
-      const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
+      const gitIndicators = resolveThreadGitIndicators({
+        hasWorkingTreeChanges: gitStatusByThreadId.get(thread.id)?.hasWorkingTreeChanges ?? false,
+        worktreePath: thread.worktreePath,
+      });
       const terminalStatus = terminalStatusFromRunningIds(
         selectThreadTerminalState(terminalStateByThreadId, thread.id).runningTerminalIds,
       );
@@ -1333,25 +1277,26 @@ export default function Sidebar() {
             }}
           >
             <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-              {prStatus && (
-                <Tooltip>
+              {gitIndicators.map((gitIndicator) => (
+                <Tooltip key={gitIndicator.kind}>
                   <TooltipTrigger
                     render={
-                      <button
-                        type="button"
-                        aria-label={prStatus.tooltip}
-                        className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
-                        onClick={(event) => {
-                          openPrLink(event, prStatus.url);
-                        }}
+                      <span
+                        role="img"
+                        aria-label={gitIndicator.tooltip}
+                        className={`inline-flex items-center justify-center ${gitIndicator.colorClass}`}
                       >
-                        <GitPullRequestIcon className="size-3" />
-                      </button>
+                        {gitIndicator.kind === "dirty" ? (
+                          <FileDiffIcon className="size-3" />
+                        ) : (
+                          <GitForkIcon className="size-3" />
+                        )}
+                      </span>
                     }
                   />
-                  <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
+                  <TooltipPopup side="top">{gitIndicator.tooltip}</TooltipPopup>
                 </Tooltip>
-              )}
+              ))}
               {threadStatus && <ThreadStatusLabel status={threadStatus} />}
               {renamingThreadId === thread.id ? (
                 <input
