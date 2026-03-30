@@ -20,11 +20,12 @@ function getServerHttpOrigin(): string {
 }
 
 const serverHttpOrigin = getServerHttpOrigin();
+const projectFaviconCacheKey = Math.random().toString(36).slice(2);
 
 const loadedProjectFaviconSrcs = new Set<string>();
 
 export function ProjectFavicon({ cwd, className }: { cwd: string; className?: string }) {
-  const src = `${serverHttpOrigin}/api/project-favicon?cwd=${encodeURIComponent(cwd)}`;
+  const src = `${serverHttpOrigin}/api/project-favicon?cwd=${encodeURIComponent(cwd)}&v=${projectFaviconCacheKey}`;
   const [status, setStatus] = useState<"loading" | "loaded" | "error">(() =>
     loadedProjectFaviconSrcs.has(src) ? "loaded" : "loading",
   );

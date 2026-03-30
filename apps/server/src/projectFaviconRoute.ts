@@ -81,7 +81,7 @@ function serveFaviconFile(filePath: string, res: http.ServerResponse): void {
     }
     res.writeHead(200, {
       "Content-Type": contentType,
-      "Cache-Control": "public, max-age=3600",
+      "Cache-Control": "no-store",
     });
     res.end(data);
   });
@@ -90,7 +90,7 @@ function serveFaviconFile(filePath: string, res: http.ServerResponse): void {
 function serveFallbackFavicon(res: http.ServerResponse): void {
   res.writeHead(200, {
     "Content-Type": "image/svg+xml",
-    "Cache-Control": "public, max-age=3600",
+    "Cache-Control": "no-store",
   });
   res.end(FALLBACK_FAVICON_SVG);
 }
