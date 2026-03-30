@@ -58,6 +58,8 @@ import {
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
+const USER_MESSAGE_TEXT_CLASS_NAME =
+  "wrap-break-word whitespace-pre-wrap text-sm leading-relaxed text-foreground pointer-coarse:text-base";
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
@@ -725,11 +727,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
           );
         }
 
-        return (
-          <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
-            {inlineNodes}
-          </div>
-        );
+        return <div className={USER_MESSAGE_TEXT_CLASS_NAME}>{inlineNodes}</div>;
       }
     }
 
@@ -753,22 +751,14 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       return null;
     }
 
-    return (
-      <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
-        {inlineNodes}
-      </div>
-    );
+    return <div className={USER_MESSAGE_TEXT_CLASS_NAME}>{inlineNodes}</div>;
   }
 
   if (props.text.length === 0) {
     return null;
   }
 
-  return (
-    <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
-      {props.text}
-    </pre>
-  );
+  return <div className={USER_MESSAGE_TEXT_CLASS_NAME}>{props.text}</div>;
 });
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {

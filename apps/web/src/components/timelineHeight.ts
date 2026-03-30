@@ -12,7 +12,7 @@ const USER_ATTACHMENT_ROW_HEIGHT_PX = 228;
 const USER_BUBBLE_WIDTH_RATIO = 0.8;
 const USER_BUBBLE_HORIZONTAL_PADDING_PX = 32;
 const ASSISTANT_MESSAGE_HORIZONTAL_PADDING_PX = 8;
-const USER_MONO_AVG_CHAR_WIDTH_PX = 8.4;
+const USER_MESSAGE_AVG_CHAR_WIDTH_PX = 7.2;
 const ASSISTANT_AVG_CHAR_WIDTH_PX = 7.2;
 const MIN_USER_CHARS_PER_LINE = 4;
 const MIN_ASSISTANT_CHARS_PER_LINE = 20;
@@ -54,7 +54,10 @@ function estimateCharsPerLineForUser(timelineWidthPx: number | null): number {
   if (!isFinitePositiveNumber(timelineWidthPx)) return USER_CHARS_PER_LINE_FALLBACK;
   const bubbleWidthPx = timelineWidthPx * USER_BUBBLE_WIDTH_RATIO;
   const textWidthPx = Math.max(bubbleWidthPx - USER_BUBBLE_HORIZONTAL_PADDING_PX, 0);
-  return Math.max(MIN_USER_CHARS_PER_LINE, Math.floor(textWidthPx / USER_MONO_AVG_CHAR_WIDTH_PX));
+  return Math.max(
+    MIN_USER_CHARS_PER_LINE,
+    Math.floor(textWidthPx / USER_MESSAGE_AVG_CHAR_WIDTH_PX),
+  );
 }
 
 function estimateCharsPerLineForAssistant(timelineWidthPx: number | null): number {
