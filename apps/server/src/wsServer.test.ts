@@ -1,4 +1,5 @@
 import * as Http from "node:http";
+import * as Https from "node:https";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -87,6 +88,53 @@ const defaultProviderRegistryService: ProviderRegistryShape = {
 };
 
 const defaultServerSettings = DEFAULT_SERVER_SETTINGS;
+const TEST_TLS_KEY_PEM = `-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCu7hvNFqbwDrTp
+7qvUBTB3sKRmyIDoqiUl0+t+euhlfD8LpgYc0f9x5tP+zXN6VNQ7qRJK9E8eApGh
+f2zpLgmJv8PgefsDua/EjtcL9bYw/nziUacpF6OQDz7Np2pkoTVleZ3HHG6HAmDY
+n8cgqllvdtCONAV7PoK3v4o+d5xHk4HonZHIZxmS0lURQJ0xE0McG6DsKhPxBqvc
+jKZXeI6GZf10gPrpDbCF6mkuzrHuprrfI7lYHiC/d6DfCNfDKTM70xzbSN94M96g
+s7rQbl0jhJYN02TB63SHYO7XYGwCx6qSi+Kv5x51PxgwIW1Zit1/r2uXS1+f4+yb
+XzU5wToDAgMBAAECggEAG9j6AgcmIjclI8yD/CerVJKBSX+HzgIwEbqP1b25O1ax
+LqiKdpITqU1G2FxaktHoS2sZ52bHJY7hIiWH8AMNL6mghB7HEAvCaHcY0uWV0Gzi
+8qBvDQKfXjKfG9wX+tcTCgl3TZhAHCwLwNCGwbN8s1rlzo2HhdwosRnD5zfhYB9f
+AWUrOmlnAWFvsZutoBjQeZsE17YJ0O9PO2Ae/BWEJa2gvxiCZ+MNyRlSiZwjKVh5
+1v9M7EeigAL9QTP7fxdY0vrN0wWPCrKD+KUIarlLbxTQ2JPsUON3dF1rgv4q5j1D
+66gpwrXCh7zfua2vKXFwUHnzOA+sjk0yH6pCb0T8gQKBgQDT3dYGp2UkayLmTzfv
+h0jQCqeP5sL5V+yxXZLRfu8IqmI1T3OeZjaTKk4f3bVUO/JhvLb2pjixhgWt8Ivz
+lVA3UtM+XnWz+UNxFP68T2P8bmQam2pHaf/7Cdc5M9pBbkyxJjAU8QMCS6SDAifQ
+McS0zGruLop7O9GorpAztsWmQQKBgQDTXpIicAcNG+V8q2z7Z1UY1VlPQUCwknLf
+tXDHz7dHmludoMOdIhoie4GyVsy9rVCsFZBRPmJo1CqveSTCiU2Dynvi9SwLE1QV
+OzMEcre7RCyt3KOjpFXDQRrmrdy8w7xQVkwdLT+BozOvfqs+tRIoW9u/JRss04bh
+urGO9R73QwKBgQC//PqBtRdWVS+e/JJ3oGQ/AiitojN0uFRotZ7h8OCzPZMZNBJV
+q9IwsdlxzvsOhfQy1UwHXsFpPUXQRXbNGLVELO34Sqjmmi6fPqNICblVesODyOoa
+JNguqNA7qd1SBZ3BuhVAJNbRMbK2dTGW3EKgg80yYUJkQeTPssBB3JJnAQKBgCR6
+F6IVz0G15L7FHsOsK4VjnEwPKMjQHT76IwJ4mFqlCtaDHf8KGZSF1/YdAKxjMp7g
+Ac3jhDwvEUbDE1L3OwdZdFPQl885gLNBSiakXYzV0RgYEa11+M7/d1MEAioZZXA/
+1Fbcri8DKTJKG+dwfDe20o+EKdJslsRx4Z6YMsXdAoGAVOUEonCv6KaPhDR70Y1d
+SLJ2YpXob/3CUyST4mTvuBSoXlY9GXquJ2ZJuAJkuVnm4tcJGBEqgcHC8lF5B64o
+myDjoDaHNuwFdlJ/laTek2Qgz8HL4Le6JWRx9B9r9MGPpBomxEpqLkCORdmMmftp
+sSRDCV9PpIWwYqVIfL2TcDY=
+-----END PRIVATE KEY-----`;
+const TEST_TLS_CERT_PEM = `-----BEGIN CERTIFICATE-----
+MIIDCTCCAfGgAwIBAgIUGgP3l324K/KrU28Om7XQOPpQW4gwDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJMTI3LjAuMC4xMB4XDTI2MDMzMDE2NDYxN1oXDTI3MDMz
+MDE2NDYxN1owFDESMBAGA1UEAwwJMTI3LjAuMC4xMIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAru4bzRam8A606e6r1AUwd7CkZsiA6KolJdPrfnroZXw/
+C6YGHNH/cebT/s1zelTUO6kSSvRPHgKRoX9s6S4Jib/D4Hn7A7mvxI7XC/W2MP58
+4lGnKRejkA8+zadqZKE1ZXmdxxxuhwJg2J/HIKpZb3bQjjQFez6Ct7+KPnecR5OB
+6J2RyGcZktJVEUCdMRNDHBug7CoT8Qar3IymV3iOhmX9dID66Q2wheppLs6x7qa6
+3yO5WB4gv3eg3wjXwykzO9Mc20jfeDPeoLO60G5dI4SWDdNkwet0h2Du12BsAseq
+kovir+cedT8YMCFtWYrdf69rl0tfn+Psm181OcE6AwIDAQABo1MwUTAdBgNVHQ4E
+FgQUniKlqWm9ZGRlIjNbjve8Uj2jf98wHwYDVR0jBBgwFoAUniKlqWm9ZGRlIjNb
+jve8Uj2jf98wDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAC7h+
+Of1vna01dS770fU/UpbINiKR5gykwpOdFWfvYzvutCgnfuBw2X7VpPiRW9OQM5U6
+zHOQweDyjuVyUfHw4s3r5JuhIV5fkZs6/tEs2yWjfrPSVKsx+G/vxVCz+4taOdPf
+d58I3utKoQYZTkcmXRfBFyL5u78/6ae7yxJLy1IFFdIzfhJpT4n2AZQFh08aYDOv
+Wim9pBRJ8VjGD14sYsQ0MpyukTo2tewxC/opdMHozVluI6MVDkF/idv2B90sK73V
+kqOTKK1u93YLPjWaZhCPoV7fuQ72cIL34CVBiyIE7t8rw6F4qTPH46cP5dsGKLOK
+mI/e0tp3kQnk6tqXcA==
+-----END CERTIFICATE-----`;
 
 class MockTerminalManager implements TerminalManagerShape {
   private readonly sessions = new Map<string, TerminalSessionSnapshot>();
@@ -290,10 +338,17 @@ function asWebSocketResponse(message: unknown): WebSocketResponse | null {
   return message as WebSocketResponse;
 }
 
-function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
+function connectWsOnce(
+  port: number,
+  token?: string,
+  options?: { secure?: boolean },
+): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`);
+    const protocol = options?.secure ? "wss" : "ws";
+    const ws = new WebSocket(`${protocol}://127.0.0.1:${port}/${query}`, {
+      rejectUnauthorized: options?.secure ? false : undefined,
+    });
     const channels: SocketChannels = {
       push: { queue: [], waiters: [] },
       response: { queue: [], waiters: [] },
@@ -317,12 +372,17 @@ function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
   });
 }
 
-async function connectWs(port: number, token?: string, attempts = 5): Promise<WebSocket> {
+async function connectWs(
+  port: number,
+  token?: string,
+  attempts = 5,
+  options?: { secure?: boolean },
+): Promise<WebSocket> {
   let lastError: unknown = new Error("WebSocket connection failed");
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await connectWsOnce(port, token);
+      return await connectWsOnce(port, token, options);
     } catch (error) {
       lastError = error;
       if (attempt < attempts - 1) {
@@ -338,8 +398,9 @@ async function connectWs(port: number, token?: string, attempts = 5): Promise<We
 async function connectAndAwaitWelcome(
   port: number,
   token?: string,
+  options?: { secure?: boolean },
 ): Promise<[WebSocket, WsPushMessage<typeof WS_CHANNELS.serverWelcome>]> {
-  const ws = await connectWs(port, token);
+  const ws = await connectWs(port, token, 5, options);
   const welcome = await waitForPush(ws, WS_CHANNELS.serverWelcome);
   return [ws, welcome];
 }
@@ -438,6 +499,37 @@ async function requestPath(
   });
 }
 
+async function requestSecurePath(
+  port: number,
+  requestPath: string,
+): Promise<{ statusCode: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = Https.request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: requestPath,
+        method: "GET",
+        rejectUnauthorized: false,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        res.on("end", () => {
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    req.once("error", reject);
+    req.end();
+  });
+}
+
 function compileKeybindings(bindings: KeybindingsConfig): ResolvedKeybindingsConfig {
   const resolved: Array<ResolvedKeybindingsConfig[number]> = [];
   for (const binding of bindings) {
@@ -496,6 +588,10 @@ describe("WebSocket Server", () => {
       authToken?: string;
       baseDir?: string;
       staticDir?: string;
+      tls?: {
+        cert: string;
+        key: string;
+      };
       providerLayer?: Layer.Layer<ProviderService, never>;
       providerRegistry?: ProviderRegistryShape;
       open?: OpenShape;
@@ -512,6 +608,19 @@ describe("WebSocket Server", () => {
     const baseDir = options.baseDir ?? makeTempDir("t3code-ws-base-");
     const devUrl = options.devUrl ? new URL(options.devUrl) : undefined;
     const derivedPaths = deriveServerPathsSync(baseDir, devUrl);
+    const tls =
+      options.tls === undefined
+        ? undefined
+        : (() => {
+            const certPath = path.join(baseDir, "tls-cert.pem");
+            const keyPath = path.join(baseDir, "tls-key.pem");
+            fs.writeFileSync(certPath, options.tls.cert, "utf8");
+            fs.writeFileSync(keyPath, options.tls.key, "utf8");
+            return {
+              certPath,
+              keyPath,
+            };
+          })();
     const scope = await Effect.runPromise(Scope.make("sequential"));
     const persistenceLayer = options.persistenceLayer ?? SqlitePersistenceMemory;
     const providerLayer = options.providerLayer ?? makeServerProviderLayer();
@@ -524,6 +633,7 @@ describe("WebSocket Server", () => {
       mode: "web",
       port: 0,
       host: undefined,
+      tls,
       cwd: options.cwd ?? "/test/project",
       baseDir,
       ...derivedPaths,
@@ -607,6 +717,30 @@ describe("WebSocket Server", () => {
     connections.push(ws);
 
     expect(welcome.type).toBe("push");
+    expect(welcome.data).toEqual({
+      cwd: "/test/project",
+      projectName: "project",
+    });
+  });
+
+  it("serves HTTPS and accepts secure WebSocket upgrades when TLS is configured", async () => {
+    server = await createTestServer({
+      cwd: "/test/project",
+      tls: {
+        cert: TEST_TLS_CERT_PEM,
+        key: TEST_TLS_KEY_PEM,
+      },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await requestSecurePath(port, "/");
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toContain("No static directory configured");
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port, undefined, { secure: true });
+    connections.push(ws);
     expect(welcome.data).toEqual({
       cwd: "/test/project",
       projectName: "project",

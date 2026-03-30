@@ -7,6 +7,7 @@
  * @module Server
  */
 import http from "node:http";
+import https from "node:https";
 import type { Duplex } from "node:stream";
 
 import Mime from "@effect/platform-node/Mime";
@@ -423,8 +424,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     } satisfies OrchestrationCommand;
   });
 
-  // HTTP server — serves static files or redirects to Vite dev server
-  const httpServer = http.createServer((req, res) => {
+  const requestHandler: http.RequestListener = (req, res) => {
     const respond = (
       statusCode: number,
       headers: Record<string, string>,
@@ -585,7 +585,32 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
       }
     });
+  };
+
+  const tlsCredentials = yield* Effect.gen(function* () {
+    if (!serverConfig.tls) {
+      return undefined;
+    }
+
+    const [cert, key] = yield* Effect.all([
+      fileSystem.readFile(serverConfig.tls.certPath),
+      fileSystem.readFile(serverConfig.tls.keyPath),
+    ]).pipe(
+      Effect.mapError(
+        (cause) => new ServerLifecycleError({ operation: "readTlsCredentials", cause }),
+      ),
+    );
+
+    return {
+      cert: Buffer.from(cert),
+      key: Buffer.from(key),
+    };
   });
+
+  // HTTP(S) server — serves static files or redirects to Vite dev server
+  const httpServer = tlsCredentials
+    ? https.createServer(tlsCredentials, requestHandler)
+    : http.createServer(requestHandler);
 
   // WebSocket server — upgrades from the HTTP server
   const wss = new WebSocketServer({ noServer: true });

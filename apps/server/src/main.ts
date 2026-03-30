@@ -13,7 +13,9 @@ import {
   DEFAULT_PORT,
   deriveServerPaths,
   resolveStaticDir,
+  resolveServerProtocol,
   ServerConfig,
+  type ServerTlsConfig,
   type RuntimeMode,
   type ServerConfigShape,
 } from "./config";
@@ -41,6 +43,8 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   mode: Schema.optional(Schema.String),
   port: Schema.optional(PortSchema),
   host: Schema.optional(Schema.String),
+  tlsCertPath: Schema.optional(Schema.String),
+  tlsKeyPath: Schema.optional(Schema.String),
   t3Home: Schema.optional(Schema.String),
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
@@ -53,6 +57,8 @@ interface CliInput {
   readonly mode: Option.Option<RuntimeMode>;
   readonly port: Option.Option<number>;
   readonly host: Option.Option<string>;
+  readonly tlsCertPath: Option.Option<string>;
+  readonly tlsKeyPath: Option.Option<string>;
   readonly t3Home: Option.Option<string>;
   readonly devUrl: Option.Option<URL>;
   readonly noBrowser: Option.Option<boolean>;
@@ -113,6 +119,14 @@ const CliEnvConfig = Config.all({
   ),
   port: Config.port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
   host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  tlsCertPath: Config.string("T3CODE_TLS_CERT_PATH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  tlsKeyPath: Config.string("T3CODE_TLS_KEY_PATH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
@@ -147,6 +161,28 @@ const resolveOptionPrecedence = <Value>(
 const isValidPort = (value: number): boolean => value >= 1 && value <= 65_535;
 const isRuntimeMode = (value: string): value is RuntimeMode =>
   value === "web" || value === "desktop";
+const resolveTlsConfig = (
+  certPath: string | undefined,
+  keyPath: string | undefined,
+): Effect.Effect<ServerTlsConfig | undefined, StartupError> => {
+  if (!certPath && !keyPath) {
+    return Effect.void.pipe(Effect.as(undefined));
+  }
+
+  if (certPath && keyPath) {
+    return Effect.succeed({
+      certPath,
+      keyPath,
+    });
+  }
+
+  return Effect.fail(
+    new StartupError({
+      message:
+        "TLS requires both certificate and key paths. Provide both T3CODE_TLS_CERT_PATH and T3CODE_TLS_KEY_PATH.",
+    }),
+  );
+};
 
 const ServerConfigLive = (input: CliInput) =>
   Layer.effect(
@@ -205,6 +241,26 @@ const ServerConfigLive = (input: CliInput) =>
           ),
         ),
         () => undefined,
+      );
+      const tls = yield* resolveTlsConfig(
+        Option.getOrUndefined(
+          resolveOptionPrecedence(
+            input.tlsCertPath,
+            Option.fromUndefinedOr(env.tlsCertPath),
+            Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+              Option.fromUndefinedOr(bootstrap.tlsCertPath),
+            ),
+          ),
+        ),
+        Option.getOrUndefined(
+          resolveOptionPrecedence(
+            input.tlsKeyPath,
+            Option.fromUndefinedOr(env.tlsKeyPath),
+            Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+              Option.fromUndefinedOr(bootstrap.tlsKeyPath),
+            ),
+          ),
+        ),
       );
       const baseDir = yield* resolveBaseDir(
         Option.getOrUndefined(
@@ -276,6 +332,7 @@ const ServerConfigLive = (input: CliInput) =>
         port,
         cwd: cliConfig.cwd,
         host,
+        tls,
         baseDir,
         ...derivedPaths,
         staticDir,
@@ -352,10 +409,11 @@ const makeServerRuntimeProgram = (input: CliInput) =>
     yield* start;
     yield* Effect.forkChild(recordStartupHeartbeat);
 
-    const localUrl = `http://localhost:${config.port}`;
+    const protocol = resolveServerProtocol(config);
+    const localUrl = `${protocol}://localhost:${config.port}`;
     const bindUrl =
       config.host && !isWildcardHost(config.host)
-        ? `http://${formatHostForUrl(config.host)}:${config.port}`
+        ? `${protocol}://${formatHostForUrl(config.host)}:${config.port}`
         : localUrl;
     const { authToken, devUrl, ...safeConfig } = config;
     yield* Effect.logInfo("T3 Code running", {
@@ -402,6 +460,14 @@ const hostFlag = Flag.string("host").pipe(
   Flag.withDescription("Host/interface to bind (for example 127.0.0.1, 0.0.0.0, or a Tailnet IP)."),
   Flag.optional,
 );
+const tlsCertPathFlag = Flag.string("tls-cert-path").pipe(
+  Flag.withDescription("PEM certificate path for HTTPS mode (equivalent to T3CODE_TLS_CERT_PATH)."),
+  Flag.optional,
+);
+const tlsKeyPathFlag = Flag.string("tls-key-path").pipe(
+  Flag.withDescription("PEM private key path for HTTPS mode (equivalent to T3CODE_TLS_KEY_PATH)."),
+  Flag.optional,
+);
 const t3HomeFlag = Flag.string("home-dir").pipe(
   Flag.withDescription("Base directory for all T3 Code data (equivalent to T3CODE_HOME)."),
   Flag.optional,
@@ -443,6 +509,8 @@ export const t3Cli = Command.make("t3", {
   mode: modeFlag,
   port: portFlag,
   host: hostFlag,
+  tlsCertPath: tlsCertPathFlag,
+  tlsKeyPath: tlsKeyPathFlag,
   t3Home: t3HomeFlag,
   devUrl: devUrlFlag,
   noBrowser: noBrowserFlag,

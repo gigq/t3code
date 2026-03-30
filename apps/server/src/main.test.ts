@@ -129,12 +129,26 @@ it.layer(testLayer)("server CLI command", (it) => {
     }),
   );
 
+  it.effect("accepts HTTPS certificate and key paths from CLI flags", () =>
+    Effect.gen(function* () {
+      yield* runCli(["--tls-cert-path", "/tmp/dev-cert.pem", "--tls-key-path", "/tmp/dev-key.pem"]);
+
+      assert.equal(start.mock.calls.length, 1);
+      assert.deepEqual(resolvedConfig?.tls, {
+        certPath: "/tmp/dev-cert.pem",
+        keyPath: "/tmp/dev-key.pem",
+      });
+    }),
+  );
+
   it.effect("uses env fallbacks when flags are not provided", () =>
     Effect.gen(function* () {
       yield* runCli([], {
         T3CODE_MODE: "desktop",
         T3CODE_PORT: "4999",
         T3CODE_HOST: "100.88.10.4",
+        T3CODE_TLS_CERT_PATH: "/tmp/env-cert.pem",
+        T3CODE_TLS_KEY_PATH: "/tmp/env-key.pem",
         T3CODE_HOME: "/tmp/t3-env-home",
         VITE_DEV_SERVER_URL: "http://localhost:5173",
         T3CODE_NO_BROWSER: "true",
@@ -148,6 +162,10 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.baseDir, "/tmp/t3-env-home");
       assert.equal(resolvedConfig?.stateDir, "/tmp/t3-env-home/dev");
       assert.equal(resolvedConfig?.devUrl?.toString(), "http://localhost:5173/");
+      assert.deepEqual(resolvedConfig?.tls, {
+        certPath: "/tmp/env-cert.pem",
+        keyPath: "/tmp/env-key.pem",
+      });
       assert.equal(resolvedConfig?.noBrowser, true);
       assert.equal(resolvedConfig?.authToken, "env-token");
       assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
@@ -406,6 +424,18 @@ it.layer(testLayer)("server CLI command", (it) => {
       yield* runCli(["--port", "70000"]).pipe(Effect.catch(() => Effect.void));
 
       // effect/unstable/cli renders help/errors for parse failures and returns success.
+      assert.equal(start.mock.calls.length, 0);
+      assert.equal(stop.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("does not start server when only one TLS path is configured", () =>
+    Effect.gen(function* () {
+      yield* runCli([], {
+        T3CODE_TLS_CERT_PATH: "/tmp/only-cert.pem",
+        T3CODE_NO_BROWSER: "true",
+      }).pipe(Effect.catch(() => Effect.void));
+
       assert.equal(start.mock.calls.length, 0);
       assert.equal(stop.mock.calls.length, 0);
     }),

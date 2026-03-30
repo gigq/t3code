@@ -11,6 +11,12 @@ import { Effect, FileSystem, Layer, Path, ServiceMap } from "effect";
 export const DEFAULT_PORT = 3773;
 
 export type RuntimeMode = "web" | "desktop";
+export type ServerProtocol = "http" | "https";
+
+export interface ServerTlsConfig {
+  readonly certPath: string;
+  readonly keyPath: string;
+}
 
 /**
  * ServerDerivedPaths - Derived paths from the base directory.
@@ -37,6 +43,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly mode: RuntimeMode;
   readonly port: number;
   readonly host: string | undefined;
+  readonly tls: ServerTlsConfig | undefined;
   readonly cwd: string;
   readonly baseDir: string;
   readonly staticDir: string | undefined;
@@ -105,6 +112,7 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           logWebSocketEvents: false,
           port: 0,
           host: undefined,
+          tls: undefined,
           authToken: undefined,
           staticDir: undefined,
           devUrl,
@@ -134,3 +142,6 @@ export const resolveStaticDir = Effect.fn(function* () {
   }
   return undefined;
 });
+
+export const resolveServerProtocol = (config: Pick<ServerConfigShape, "tls">): ServerProtocol =>
+  config.tls ? "https" : "http";
