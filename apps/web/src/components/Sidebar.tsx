@@ -21,6 +21,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   DndContext,
   type DragCancelEvent,
@@ -55,6 +56,7 @@ import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
+import { useUiStateStore } from "../uiStateStore";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
@@ -119,6 +121,7 @@ import {
   resolveThreadGitIndicators,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
@@ -129,6 +132,7 @@ import { SidebarCodexUsageControl } from "./sidebar/SidebarCodexUsageControl";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useImportCodexThread } from "~/hooks/useImportCodexThread";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
+import type { Project, Thread } from "../types";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -145,6 +149,80 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
+
+type SidebarThreadSnapshot = Pick<
+  Thread,
+  | "activities"
+  | "archivedAt"
+  | "branch"
+  | "createdAt"
+  | "id"
+  | "interactionMode"
+  | "latestTurn"
+  | "projectId"
+  | "proposedPlans"
+  | "session"
+  | "title"
+  | "updatedAt"
+  | "worktreePath"
+> & {
+  lastVisitedAt?: string | undefined;
+  latestUserMessageAt: string | null;
+};
+
+type SidebarProjectSnapshot = Project & {
+  expanded: boolean;
+};
+
+const sidebarThreadSnapshotCache = new WeakMap<
+  Thread,
+  { lastVisitedAt?: string | undefined; snapshot: SidebarThreadSnapshot }
+>();
+
+function getLatestUserMessageAt(thread: Thread): string | null {
+  let latestUserMessageAt: string | null = null;
+
+  for (const message of thread.messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    if (latestUserMessageAt === null || message.createdAt > latestUserMessageAt) {
+      latestUserMessageAt = message.createdAt;
+    }
+  }
+
+  return latestUserMessageAt;
+}
+
+function toSidebarThreadSnapshot(
+  thread: Thread,
+  lastVisitedAt: string | undefined,
+): SidebarThreadSnapshot {
+  const cached = sidebarThreadSnapshotCache.get(thread);
+  if (cached && cached.lastVisitedAt === lastVisitedAt) {
+    return cached.snapshot;
+  }
+
+  const snapshot: SidebarThreadSnapshot = {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    interactionMode: thread.interactionMode,
+    session: thread.session,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    archivedAt: thread.archivedAt,
+    latestTurn: thread.latestTurn,
+    lastVisitedAt,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    activities: thread.activities,
+    proposedPlans: thread.proposedPlans,
+    latestUserMessageAt: getLatestUserMessageAt(thread),
+  };
+  sidebarThreadSnapshotCache.set(thread, { lastVisitedAt, snapshot });
+  return snapshot;
+}
 interface TerminalStatusIndicator {
   label: "Terminal process running";
   colorClass: string;
@@ -329,10 +407,17 @@ function SortableProjectItem({
 
 export default function Sidebar() {
   const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
-  const markThreadUnread = useStore((store) => store.markThreadUnread);
-  const toggleProject = useStore((store) => store.toggleProject);
-  const reorderProjects = useStore((store) => store.reorderProjects);
+  const serverThreads = useStore((store) => store.threads);
+  const { projectExpandedById, projectOrder, threadLastVisitedAtById } = useUiStateStore(
+    useShallow((store) => ({
+      projectExpandedById: store.projectExpandedById,
+      projectOrder: store.projectOrder,
+      threadLastVisitedAtById: store.threadLastVisitedAtById,
+    })),
+  );
+  const markThreadUnread = useUiStateStore((store) => store.markThreadUnread);
+  const toggleProject = useUiStateStore((store) => store.toggleProject);
+  const reorderProjects = useUiStateStore((store) => store.reorderProjects);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const getDraftThreadByProjectId = useComposerDraftStore(
     (store) => store.getDraftThreadByProjectId,
@@ -383,6 +468,29 @@ export default function Sidebar() {
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
+  const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
+  const orderedProjects = useMemo(() => {
+    return orderItemsByPreferredIds({
+      items: projects,
+      preferredIds: projectOrder,
+      getId: (project) => project.id,
+    });
+  }, [projectOrder, projects]);
+  const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(
+    () =>
+      orderedProjects.map((project) => ({
+        ...project,
+        expanded: projectExpandedById[project.id] ?? true,
+      })),
+    [orderedProjects, projectExpandedById],
+  );
+  const threads = useMemo(
+    () =>
+      serverThreads.map((thread) =>
+        toSidebarThreadSnapshot(thread, threadLastVisitedAtById[thread.id]),
+      ),
+    [serverThreads, threadLastVisitedAtById],
+  );
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
@@ -679,7 +787,7 @@ export default function Sidebar() {
       }
 
       if (clicked === "mark-unread") {
-        markThreadUnread(threadId);
+        markThreadUnread(threadId, thread.latestTurn?.completedAt);
         return;
       }
       if (clicked === "copy-path") {
@@ -729,7 +837,8 @@ export default function Sidebar() {
 
       if (clicked === "mark-unread") {
         for (const id of ids) {
-          markThreadUnread(id);
+          const thread = threads.find((candidate) => candidate.id === id);
+          markThreadUnread(id, thread?.latestTurn?.completedAt);
         }
         clearSelection();
         return;
@@ -760,6 +869,7 @@ export default function Sidebar() {
       markThreadUnread,
       removeFromSelection,
       selectedThreadIds,
+      threads,
     ],
   );
 
@@ -916,12 +1026,12 @@ export default function Sidebar() {
       dragInProgressRef.current = false;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const activeProject = projects.find((project) => project.id === active.id);
-      const overProject = projects.find((project) => project.id === over.id);
+      const activeProject = sidebarProjects.find((project) => project.id === active.id);
+      const overProject = sidebarProjects.find((project) => project.id === over.id);
       if (!activeProject || !overProject) return;
       reorderProjects(activeProject.id, overProject.id);
     },
-    [appSettings.sidebarProjectSortOrder, projects, reorderProjects],
+    [appSettings.sidebarProjectSortOrder, reorderProjects, sidebarProjects],
   );
 
   const handleProjectDragStart = useCallback(
@@ -981,8 +1091,9 @@ export default function Sidebar() {
     [threads],
   );
   const sortedProjects = useMemo(
-    () => sortProjectsForSidebar(projects, visibleThreads, appSettings.sidebarProjectSortOrder),
-    [appSettings.sidebarProjectSortOrder, projects, visibleThreads],
+    () =>
+      sortProjectsForSidebar(sidebarProjects, visibleThreads, appSettings.sidebarProjectSortOrder),
+    [appSettings.sidebarProjectSortOrder, sidebarProjects, visibleThreads],
   );
   const isManualProjectSorting = appSettings.sidebarProjectSortOrder === "manual";
   const renderedProjects = useMemo(
