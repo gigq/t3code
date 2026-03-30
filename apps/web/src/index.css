@@ -146,29 +146,6 @@ body,
   overscroll-behavior-y: none;
 }
 
-@media (display-mode: standalone), (display-mode: fullscreen) {
-  html,
-  body {
-    height: 100dvh;
-    min-height: 100dvh;
-  }
-
-  body {
-    position: fixed;
-    inset: 0;
-    box-sizing: border-box;
-    overflow: hidden;
-    overscroll-behavior: none;
-    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
-      env(safe-area-inset-left);
-  }
-
-  #root {
-    height: 100%;
-    min-height: 100%;
-  }
-}
-
 body::after {
   content: "";
   position: fixed;
