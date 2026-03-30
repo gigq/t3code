@@ -555,6 +555,10 @@ routing.layer("ProviderServiceLive routing", (it) => {
         ],
       ]);
 
+      const snapshot = yield* provider.readThread(session.threadId);
+      assert.equal(snapshot.threadId, session.threadId);
+      assert.deepEqual(routing.codex.readThread.mock.calls, [[session.threadId]]);
+
       yield* provider.rollbackConversation({
         threadId: session.threadId,
         numTurns: 0,

@@ -18,6 +18,7 @@ import {
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
+  importCodexThread: "orchestration.importCodexThread",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
@@ -535,6 +536,20 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadMessageImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: OrchestrationMessageRole,
+    text: Schema.String,
+    attachments: Schema.optional(Schema.Array(ChatAttachment)),
+    turnId: Schema.NullOr(TurnId),
+  }),
+  createdAt: IsoDateTime,
+});
+
 const ThreadProposedPlanUpsertCommand = Schema.Struct({
   type: Schema.Literal("thread.proposed-plan.upsert"),
   commandId: CommandId,
@@ -577,6 +592,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessageImportCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
@@ -1015,6 +1031,18 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const OrchestrationImportCodexThreadInput = Schema.Struct({
+  projectId: ProjectId,
+  providerThreadId: TrimmedNonEmptyString,
+  title: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationImportCodexThreadInput = typeof OrchestrationImportCodexThreadInput.Type;
+
+export const OrchestrationImportCodexThreadResult = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationImportCodexThreadResult = typeof OrchestrationImportCodexThreadResult.Type;
+
 export const OrchestrationRpcSchemas = {
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
@@ -1023,6 +1051,10 @@ export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  importCodexThread: {
+    input: OrchestrationImportCodexThreadInput,
+    output: OrchestrationImportCodexThreadResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,

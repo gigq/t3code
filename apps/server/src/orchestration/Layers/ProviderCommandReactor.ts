@@ -20,6 +20,7 @@ import { ProviderAdapterRequestError, ProviderServiceError } from "../../provide
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { toOrchestrationSession } from "../providerSession.ts";
 import {
   ProviderCommandReactor,
   type ProviderCommandReactorShape,
@@ -42,24 +43,6 @@ type ProviderIntentEvent = Extract<
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-function mapProviderSessionStatusToOrchestrationStatus(
-  status: "connecting" | "ready" | "running" | "error" | "closed",
-): OrchestrationSession["status"] {
-  switch (status) {
-    case "connecting":
-      return "starting";
-    case "running":
-      return "running";
-    case "error":
-      return "error";
-    case "closed":
-      return "stopped";
-    case "ready":
-    default:
-      return "ready";
-  }
 }
 
 const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
@@ -276,16 +259,13 @@ const make = Effect.gen(function* () {
     const bindSessionToThread = (session: ProviderSession) =>
       setThreadSession({
         threadId,
-        session: {
+        session: toOrchestrationSession({
           threadId,
-          status: mapProviderSessionStatusToOrchestrationStatus(session.status),
-          providerName: session.provider,
-          runtimeMode: desiredRuntimeMode,
-          // Provider turn ids are not orchestration turn ids.
-          activeTurnId: null,
-          lastError: session.lastError ?? null,
-          updatedAt: session.updatedAt,
-        },
+          session: {
+            ...session,
+            runtimeMode: desiredRuntimeMode,
+          },
+        }),
         createdAt,
       });
 

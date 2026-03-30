@@ -13,6 +13,7 @@ import type { Duplex } from "node:stream";
 import Mime from "@effect/platform-node/Mime";
 import {
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
@@ -79,7 +80,13 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
+import { extractCodexThreadId } from "@t3tools/shared/codex";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import {
+  buildImportedOrchestrationMessages,
+  buildImportedThreadTitle,
+} from "./orchestration/importCodexThread.ts";
+import { toOrchestrationSession } from "./orchestration/providerSession.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -424,6 +431,130 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     } satisfies OrchestrationCommand;
   });
 
+  const importCodexThread = Effect.fnUntraced(function* (input: {
+    readonly projectId: ProjectId;
+    readonly providerThreadId: string;
+    readonly title?: string | undefined;
+  }) {
+    const normalizedProviderThreadId = extractCodexThreadId(input.providerThreadId);
+    if (!normalizedProviderThreadId) {
+      return yield* new RouteRequestError({
+        message: "Enter a valid Codex session or thread ID.",
+      });
+    }
+
+    const readModel = yield* projectionReadModelQuery.getSnapshot();
+    const project = readModel.projects.find(
+      (entry) => entry.id === input.projectId && entry.deletedAt === null,
+    );
+    if (!project) {
+      return yield* new RouteRequestError({
+        message: `Project '${input.projectId}' was not found.`,
+      });
+    }
+
+    const createdAt = new Date().toISOString();
+    const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
+    const modelSelection =
+      project.defaultModelSelection?.provider === "codex"
+        ? project.defaultModelSelection
+        : {
+            provider: "codex" as const,
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          };
+    const initialTitle = input.title?.trim() || "Imported Codex thread";
+
+    yield* orchestrationEngine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+      threadId,
+      projectId: project.id,
+      title: initialTitle,
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+
+    const cleanupImportedThread = () =>
+      Effect.gen(function* () {
+        yield* providerService.stopSession({ threadId }).pipe(Effect.catch(() => Effect.void));
+        yield* orchestrationEngine
+          .dispatch({
+            type: "thread.delete",
+            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+            threadId,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+      });
+
+    return yield* Effect.gen(function* () {
+      const session = yield* providerService.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        cwd: project.workspaceRoot,
+        modelSelection,
+        resumeCursor: {
+          threadId: normalizedProviderThreadId,
+        },
+        runtimeMode: "full-access",
+      });
+      const snapshot = yield* providerService.readThread(threadId);
+      const importedMessages = buildImportedOrchestrationMessages({
+        threadId,
+        snapshot,
+        importedAt: createdAt,
+      });
+      const resolvedTitle = input.title?.trim()
+        ? input.title.trim()
+        : buildImportedThreadTitle(importedMessages, initialTitle);
+
+      if (resolvedTitle !== initialTitle) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+          threadId,
+          title: resolvedTitle,
+        });
+      }
+
+      yield* Effect.forEach(importedMessages, (message) =>
+        orchestrationEngine.dispatch({
+          type: "thread.message.import",
+          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+          threadId,
+          message: {
+            messageId: message.messageId,
+            role: message.role,
+            text: message.text,
+            turnId: message.turnId,
+          },
+          createdAt: message.createdAt,
+        }),
+      );
+
+      yield* orchestrationEngine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+        threadId,
+        session: toOrchestrationSession({ threadId, session }),
+        createdAt,
+      });
+
+      return { threadId };
+    }).pipe(
+      Effect.tapError(() => cleanupImportedThread()),
+      Effect.mapError((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        return new RouteRequestError({
+          message: `Failed to import Codex thread '${normalizedProviderThreadId}': ${message}`,
+        });
+      }),
+    );
+  });
+
   const requestHandler: http.RequestListener = (req, res) => {
     const respond = (
       statusCode: number,
@@ -640,6 +771,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
+  const providerService = yield* ProviderService;
   const { openInEditor } = yield* Open;
 
   const subscriptionsScope = yield* Scope.make("sequential");
@@ -767,6 +899,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const { command } = request.body;
         const normalizedCommand = yield* normalizeDispatchCommand({ command });
         return yield* orchestrationEngine.dispatch(normalizedCommand);
+      }
+
+      case ORCHESTRATION_WS_METHODS.importCodexThread: {
+        const body = stripRequestTag(request.body);
+        return yield* importCodexThread(body);
       }
 
       case ORCHESTRATION_WS_METHODS.getTurnDiff: {

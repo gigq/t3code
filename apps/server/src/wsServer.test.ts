@@ -1413,6 +1413,7 @@ describe("WebSocket Server", () => {
       respondToRequest: () => unsupported(),
       respondToUserInput: () => unsupported(),
       stopSession: () => unsupported(),
+      readThread: () => Effect.succeed({ threadId: asThreadId("thread-1"), turns: [] }),
       listSessions: () => Effect.succeed([]),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       rollbackConversation: () => unsupported(),

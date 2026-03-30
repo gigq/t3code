@@ -219,6 +219,8 @@ export function createWsNativeApi(): NativeApi {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
+      importCodexThread: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.importCodexThread, input),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),
       getFullThreadDiff: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getFullThreadDiff, input),

@@ -76,6 +76,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
+import { ImportCodexThreadDialog } from "./ImportCodexThreadDialog";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -123,6 +124,7 @@ import {
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useImportCodexThread } from "~/hooks/useImportCodexThread";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
@@ -342,6 +344,7 @@ export default function Sidebar() {
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread } = useHandleNewThread();
+  const { importCodexThread } = useImportCodexThread();
   const { confirmAndDeleteThread, deleteThread } = useThreadActions();
   const routeThreadId = useParams({
     strict: false,
@@ -362,6 +365,7 @@ export default function Sidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
+  const [importDialogProjectId, setImportDialogProjectId] = useState<ProjectId | null>(null);
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
@@ -423,6 +427,10 @@ export default function Sidebar() {
       refetchInterval: 60_000,
     })),
   });
+  const importDialogProject =
+    importDialogProjectId !== null
+      ? (projects.find((project) => project.id === importDialogProjectId) ?? null)
+      : null;
   const gitStatusByThreadId = useMemo(() => {
     const statusByCwd = new Map<string, GitStatusResult>();
     for (let index = 0; index < threadGitStatusCwds.length; index += 1) {
@@ -821,11 +829,16 @@ export default function Sidebar() {
 
       const clicked = await api.contextMenu.show(
         [
+          { id: "import-codex-thread", label: "Import Codex thread..." },
           { id: "copy-path", label: "Copy Project Path" },
           { id: "delete", label: "Remove project", destructive: true },
         ],
         position,
       );
+      if (clicked === "import-codex-thread") {
+        setImportDialogProjectId(projectId);
+        return;
+      }
       if (clicked === "copy-path") {
         copyPathToClipboard(project.cwd, { path: project.cwd });
         return;
@@ -872,6 +885,7 @@ export default function Sidebar() {
       copyPathToClipboard,
       getDraftThreadByProjectId,
       projects,
+      setImportDialogProjectId,
       threads,
     ],
   );
@@ -1900,6 +1914,24 @@ export default function Sidebar() {
           </SidebarFooter>
         </>
       )}
+      {importDialogProject ? (
+        <ImportCodexThreadDialog
+          open
+          projectName={importDialogProject.name}
+          onOpenChange={(open) => {
+            if (!open) {
+              setImportDialogProjectId(null);
+            }
+          }}
+          onSubmit={async (input) => {
+            await importCodexThread({
+              projectId: importDialogProject.id,
+              providerThreadId: input.providerThreadId,
+              ...(input.title ? { title: input.title } : {}),
+            });
+          }}
+        />
+      ) : null}
     </>
   );
 }

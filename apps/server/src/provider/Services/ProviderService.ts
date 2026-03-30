@@ -28,7 +28,7 @@ import { ServiceMap } from "effect";
 import type { Effect, Stream } from "effect";
 
 import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type { ProviderAdapterCapabilities, ProviderThreadSnapshot } from "./ProviderAdapter.ts";
 
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
@@ -76,6 +76,13 @@ export interface ProviderServiceShape {
   readonly stopSession: (
     input: ProviderStopSessionInput,
   ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Read the current provider thread snapshot for an active or recoverable session.
+   */
+  readonly readThread: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ProviderThreadSnapshot, ProviderServiceError>;
 
   /**
    * List active provider sessions.

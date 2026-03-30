@@ -39,6 +39,10 @@
     "./String": {
       "types": "./src/String.ts",
       "import": "./src/String.ts"
+    },
+    "./codex": {
+      "types": "./src/codex.ts",
+      "import": "./src/codex.ts"
     }
   },
   "scripts": {
