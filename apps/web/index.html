@@ -8,6 +8,27 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="T3 Code" />
+    <script>
+      (() => {
+        const storageKey = "t3code:theme";
+        const mediaQuery = "(prefers-color-scheme: dark)";
+        const rawTheme = localStorage.getItem(storageKey);
+        const theme =
+          rawTheme === "light" || rawTheme === "dark" || rawTheme === "system"
+            ? rawTheme
+            : "system";
+        const systemDark = window.matchMedia(mediaQuery).matches;
+        const isDark = theme === "dark" || (theme === "system" && systemDark);
+        const themeColor = isDark ? "#0b0b0c" : "#ffffff";
+        const statusBarStyle = isDark ? "black-translucent" : "default";
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeColor);
+        document
+          .querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+          ?.setAttribute("content", statusBarStyle);
+      })();
+    </script>
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

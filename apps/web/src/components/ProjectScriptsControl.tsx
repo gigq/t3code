@@ -20,6 +20,7 @@ import {
   keybindingValueForCommand,
   decodeProjectScriptKeybindingRule,
 } from "~/lib/projectScriptKeybindings";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 import {
   commandForProjectScript,
   nextProjectScriptId,
@@ -156,6 +157,7 @@ export default function ProjectScriptsControl({
   onUpdateScript,
   onDeleteScript,
 }: ProjectScriptsControlProps) {
+  const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
   const addScriptFormId = React.useId();
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -306,7 +308,13 @@ export default function ProjectScriptsControl({
                     </span>
                     <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
                       {shortcutLabel && (
-                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
+                        <MenuShortcut
+                          className={`ms-0 transition-opacity ${
+                            isCoarsePointer
+                              ? "opacity-0"
+                              : "group-hover:opacity-0 group-focus-visible:opacity-0"
+                          }`}
+                        >
                           {shortcutLabel}
                         </MenuShortcut>
                       )}
@@ -314,7 +322,11 @@ export default function ProjectScriptsControl({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
+                        className={`absolute right-0 top-1/2 size-6 -translate-y-1/2 transition-opacity ${
+                          isCoarsePointer
+                            ? "opacity-100 pointer-events-auto"
+                            : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
+                        }`}
                         aria-label={`Edit ${script.name}`}
                         onPointerDown={(event) => {
                           event.preventDefault();

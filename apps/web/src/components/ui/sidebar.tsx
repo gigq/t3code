@@ -17,7 +17,7 @@ import {
 } from "~/components/ui/sheet";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { useIsMobile } from "~/hooks/useMediaQuery";
+import { useIsMobile, useMediaQuery } from "~/hooks/useMediaQuery";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import { Schema } from "effect";
 
@@ -832,6 +832,7 @@ function SidebarMenuAction({
 }: useRender.ComponentProps<"button"> & {
   showOnHover?: boolean;
 }) {
+  const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
   const defaultProps = {
     className: cn(
       "absolute top-1.5 right-1 flex aspect-square w-5 cursor-pointer items-center justify-center rounded-lg p-0 text-sidebar-foreground outline-hidden ring-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
@@ -842,7 +843,9 @@ function SidebarMenuAction({
       "peer-data-[size=lg]/menu-button:top-2.5",
       "group-data-[collapsible=icon]:hidden",
       showOnHover &&
-        "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground md:opacity-0",
+        (isCoarsePointer
+          ? "opacity-100 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground"
+          : "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground md:opacity-0"),
       className,
     ),
     "data-sidebar": "menu-action",

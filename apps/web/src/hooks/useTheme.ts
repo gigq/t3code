@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-
-type Theme = "light" | "dark" | "system";
+import {
+  coerceStoredTheme,
+  resolveAppleStatusBarStyle,
+  resolveDarkTheme,
+  resolveThemeColor,
+  THEME_MEDIA_QUERY,
+  THEME_STORAGE_KEY,
+  type Theme,
+} from "../lib/themeShell";
 type ThemeSnapshot = {
   theme: Theme;
   systemDark: boolean;
 };
-
-const STORAGE_KEY = "t3code:theme";
-const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
@@ -17,21 +21,30 @@ function emitChange() {
 }
 
 function getSystemDark(): boolean {
-  return window.matchMedia(MEDIA_QUERY).matches;
+  return window.matchMedia(THEME_MEDIA_QUERY).matches;
 }
 
 function getStored(): Theme {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw === "light" || raw === "dark" || raw === "system") return raw;
-  return "system";
+  return coerceStoredTheme(localStorage.getItem(THEME_STORAGE_KEY));
+}
+
+function syncThemeShell(isDark: boolean) {
+  document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", resolveThemeColor(isDark));
+  document
+    .querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+    ?.setAttribute("content", resolveAppleStatusBarStyle(isDark));
 }
 
 function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
-  const isDark = theme === "dark" || (theme === "system" && getSystemDark());
+  const isDark = resolveDarkTheme(theme, getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
+  syncThemeShell(isDark);
   syncDesktopTheme(theme);
   if (suppressTransitions) {
     // Force a reflow so the no-transitions class takes effect before removal
@@ -76,7 +89,7 @@ function subscribe(listener: () => void): () => void {
   listeners.push(listener);
 
   // Listen for system preference changes
-  const mq = window.matchMedia(MEDIA_QUERY);
+  const mq = window.matchMedia(THEME_MEDIA_QUERY);
   const handleChange = () => {
     if (getStored() === "system") applyTheme("system", true);
     emitChange();
@@ -85,7 +98,7 @@ function subscribe(listener: () => void): () => void {
 
   // Listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) {
+    if (e.key === THEME_STORAGE_KEY) {
       applyTheme(getStored(), true);
       emitChange();
     }
@@ -107,7 +120,7 @@ export function useTheme() {
     theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
 
   const setTheme = useCallback((next: Theme) => {
-    localStorage.setItem(STORAGE_KEY, next);
+    localStorage.setItem(THEME_STORAGE_KEY, next);
     applyTheme(next, true);
     emitChange();
   }, []);
