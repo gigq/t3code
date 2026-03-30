@@ -1801,7 +1801,6 @@ export default function Sidebar() {
                   </Tooltip>
                 </div>
               </div>
-
               {isManualProjectSorting ? (
                 <DndContext
                   sensors={projectDnDSensors}
