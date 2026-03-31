@@ -208,6 +208,13 @@ export function createWsNativeApi(): NativeApi {
         return showContextMenuFallback(items, position);
       },
     },
+    notifications: {
+      getWebPushConfig: () => transport.request(WS_METHODS.notificationsGetWebPushConfig),
+      upsertWebPushSubscription: (input) =>
+        transport.request(WS_METHODS.notificationsUpsertWebPushSubscription, input),
+      removeWebPushSubscription: (input) =>
+        transport.request(WS_METHODS.notificationsRemoveWebPushSubscription, input),
+    },
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
       refreshProviders: () => transport.request(WS_METHODS.serverRefreshProviders),

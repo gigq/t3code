@@ -13,7 +13,7 @@ import {
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
-import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
+import { Cache, Cause, Duration, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -39,6 +39,7 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const TURN_COMPLETION_FALLBACK_DELAY = Duration.seconds(2);
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 type TurnStartRequestedDomainEvent = Extract<
@@ -116,6 +117,21 @@ function normalizeRuntimeTurnState(
     case "cancelled":
     case "completed":
       return value;
+    default:
+      return "completed";
+  }
+}
+
+function runtimeTurnStateToCompletionState(
+  value: "completed" | "failed" | "interrupted" | "cancelled",
+): "completed" | "interrupted" | "error" {
+  switch (value) {
+    case "failed":
+      return "error";
+    case "interrupted":
+    case "cancelled":
+      return "interrupted";
+    case "completed":
     default:
       return "completed";
   }
@@ -794,7 +810,145 @@ const make = Effect.fn("make")(function* () {
           : Effect.void,
       { concurrency: 1 },
     ).pipe(Effect.asVoid);
+    for (const key of pendingTurnCompletionFallbacks.keys()) {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+      const pending = pendingTurnCompletionFallbacks.get(key);
+      pendingTurnCompletionFallbacks.delete(key);
+      if (pending) {
+        yield* Fiber.interrupt(pending.fiber);
+      }
+    }
+    for (const key of Array.from(completedTurnKeys)) {
+      if (key.startsWith(prefix)) {
+        completedTurnKeys.delete(key);
+      }
+    }
   });
+
+  const pendingTurnCompletionFallbacks = new Map<
+    string,
+    {
+      fiber: Fiber.Fiber<void, never>;
+      assistantMessageId: MessageId;
+    }
+  >();
+  const completedTurnKeys = new Set<string>();
+
+  const cancelPendingTurnCompletionFallback = Effect.fn("cancelPendingTurnCompletionFallback")(
+    function* (threadId: ThreadId, turnId: TurnId) {
+      const key = providerTurnKey(threadId, turnId);
+      const pending = pendingTurnCompletionFallbacks.get(key);
+      if (!pending) {
+        return;
+      }
+      pendingTurnCompletionFallbacks.delete(key);
+      yield* Fiber.interrupt(pending.fiber);
+    },
+  );
+
+  const dispatchThreadTurnCompleted = Effect.fn("dispatchThreadTurnCompleted")(function* (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    turnId: TurnId;
+    assistantMessageId: MessageId | null;
+    state: "completed" | "interrupted" | "error";
+    completedAt: string;
+  }) {
+    const key = providerTurnKey(input.threadId, input.turnId);
+    if (completedTurnKeys.has(key)) {
+      return;
+    }
+    completedTurnKeys.add(key);
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.complete",
+      commandId: providerCommandId(input.event, "thread-turn-complete"),
+      threadId: input.threadId,
+      turnId: input.turnId,
+      ...(input.assistantMessageId ? { assistantMessageId: input.assistantMessageId } : {}),
+      state: input.state,
+      completedAt: input.completedAt,
+      createdAt: input.completedAt,
+    });
+  });
+
+  const schedulePendingTurnCompletionFallback = Effect.fn("schedulePendingTurnCompletionFallback")(
+    function* (input: {
+      event: ProviderRuntimeEvent;
+      threadId: ThreadId;
+      turnId: TurnId;
+      assistantMessageId: MessageId;
+      completedAt: string;
+    }) {
+      yield* cancelPendingTurnCompletionFallback(input.threadId, input.turnId);
+      const key = providerTurnKey(input.threadId, input.turnId);
+      const fiber = yield* Effect.gen(function* () {
+        yield* Effect.sleep(TURN_COMPLETION_FALLBACK_DELAY);
+        const readModel = yield* orchestrationEngine.getReadModel();
+        const thread = readModel.threads.find((entry) => entry.id === input.threadId);
+        if (
+          !thread ||
+          thread.session?.status !== "running" ||
+          !sameId(thread.session.activeTurnId, input.turnId)
+        ) {
+          return;
+        }
+
+        yield* dispatchThreadTurnCompleted({
+          event: input.event,
+          threadId: input.threadId,
+          turnId: input.turnId,
+          assistantMessageId: input.assistantMessageId,
+          state: "completed",
+          completedAt: input.completedAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.session.set",
+          commandId: providerCommandId(input.event, "thread-session-set-fallback-complete"),
+          threadId: input.threadId,
+          session: {
+            threadId: input.threadId,
+            status: "ready",
+            providerName: input.event.provider,
+            runtimeMode: thread.session.runtimeMode,
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: input.completedAt,
+          },
+          createdAt: input.completedAt,
+        });
+        yield* Effect.logInfo("provider runtime ingestion synthesized missing turn completion", {
+          threadId: input.threadId,
+          turnId: input.turnId,
+          assistantMessageId: input.assistantMessageId,
+        });
+      })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider runtime ingestion fallback completion failed", {
+              threadId: input.threadId,
+              turnId: input.turnId,
+              assistantMessageId: input.assistantMessageId,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        )
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              pendingTurnCompletionFallbacks.delete(key);
+            }),
+          ),
+          Effect.forkScoped,
+        );
+
+      pendingTurnCompletionFallbacks.set(key, {
+        fiber,
+        assistantMessageId: input.assistantMessageId,
+      });
+    },
+  );
 
   const getSourceProposedPlanReferenceForPendingTurnStart = Effect.fnUntraced(function* (
     threadId: ThreadId,
@@ -914,6 +1068,17 @@ const make = Effect.fn("make")(function* () {
       event.type === "turn.started" && shouldApplyThreadLifecycle
         ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
         : null;
+
+    if (eventTurnId) {
+      if (event.type === "turn.completed") {
+        yield* cancelPendingTurnCompletionFallback(thread.id, eventTurnId);
+      } else if (
+        !(event.type === "item.completed" && event.payload.itemType === "assistant_message") &&
+        event.type !== "thread.token-usage.updated"
+      ) {
+        yield* cancelPendingTurnCompletionFallback(thread.id, eventTurnId);
+      }
+    }
 
     if (
       event.type === "session.started" ||
@@ -1088,6 +1253,19 @@ const make = Effect.fn("make")(function* () {
 
       if (turnId) {
         yield* forgetAssistantMessageId(thread.id, turnId, assistantMessageId);
+        if (
+          thread.session?.status === "running" &&
+          thread.session.activeTurnId !== null &&
+          sameId(thread.session.activeTurnId, turnId)
+        ) {
+          yield* schedulePendingTurnCompletionFallback({
+            event,
+            threadId: thread.id,
+            turnId,
+            assistantMessageId,
+            completedAt: now,
+          });
+        }
       }
     }
 
@@ -1107,6 +1285,16 @@ const make = Effect.fn("make")(function* () {
       const turnId = toTurnId(event.turnId);
       if (turnId) {
         const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
+        const assistantMessageId =
+          assistantMessageIds.size > 0 ? (Array.from(assistantMessageIds).at(-1) ?? null) : null;
+        yield* dispatchThreadTurnCompleted({
+          event,
+          threadId: thread.id,
+          turnId,
+          assistantMessageId,
+          state: runtimeTurnStateToCompletionState(normalizeRuntimeTurnState(event.payload.state)),
+          completedAt: now,
+        });
         yield* Effect.forEach(
           assistantMessageIds,
           (assistantMessageId) =>

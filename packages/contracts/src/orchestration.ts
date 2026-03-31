@@ -572,6 +572,20 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadCompletionState = Schema.Literals(["completed", "interrupted", "error"]);
+export type ThreadCompletionState = typeof ThreadCompletionState.Type;
+
+const ThreadTurnCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  completedAt: IsoDateTime,
+  assistantMessageId: Schema.optional(MessageId),
+  state: ThreadCompletionState,
+  createdAt: IsoDateTime,
+});
+
 const ThreadActivityAppendCommand = Schema.Struct({
   type: Schema.Literal("thread.activity.append"),
   commandId: CommandId,
@@ -594,6 +608,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadMessageAssistantCompleteCommand,
   ThreadMessageImportCommand,
   ThreadProposedPlanUpsertCommand,
+  ThreadTurnCompleteCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
@@ -627,6 +642,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.session-stop-requested",
   "thread.session-set",
   "thread.proposed-plan-upserted",
+  "thread.turn-completed",
   "thread.turn-diff-completed",
   "thread.activity-appended",
 ]);
@@ -785,6 +801,14 @@ export const ThreadProposedPlanUpsertedPayload = Schema.Struct({
   proposedPlan: OrchestrationProposedPlan,
 });
 
+export const ThreadTurnCompletedPayload = Schema.Struct({
+  threadId: ThreadId,
+  turnId: TurnId,
+  assistantMessageId: Schema.NullOr(MessageId),
+  state: ThreadCompletionState,
+  completedAt: IsoDateTime,
+});
+
 export const ThreadTurnDiffCompletedPayload = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
@@ -922,6 +946,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.proposed-plan-upserted"),
     payload: ThreadProposedPlanUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-completed"),
+    payload: ThreadTurnCompletedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

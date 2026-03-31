@@ -38,6 +38,7 @@ import {
 import { KeybindingRule } from "./keybindings";
 import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
+import { RemoveWebPushSubscriptionInput, WebPushSubscription } from "./notifications";
 import { ServerConfigUpdatedPayload, ServerProviderUpdatedPayload } from "./server";
 import { ServerSettingsPatch } from "./settings";
 
@@ -74,6 +75,11 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+
+  // Notifications
+  notificationsGetWebPushConfig: "notifications.getWebPushConfig",
+  notificationsUpsertWebPushSubscription: "notifications.upsertWebPushSubscription",
+  notificationsRemoveWebPushSubscription: "notifications.removeWebPushSubscription",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -144,6 +150,11 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.terminalClear, TerminalClearInput),
   tagRequestBody(WS_METHODS.terminalRestart, TerminalRestartInput),
   tagRequestBody(WS_METHODS.terminalClose, TerminalCloseInput),
+
+  // Notifications
+  tagRequestBody(WS_METHODS.notificationsGetWebPushConfig, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.notificationsUpsertWebPushSubscription, WebPushSubscription),
+  tagRequestBody(WS_METHODS.notificationsRemoveWebPushSubscription, RemoveWebPushSubscriptionInput),
 
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),

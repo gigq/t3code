@@ -57,6 +57,7 @@ import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import { WebPushService } from "./notifications/Services/WebPushService.ts";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -634,6 +635,7 @@ describe("WebSocket Server", () => {
       port: 0,
       host: undefined,
       tls,
+      webPushVapidSubject: undefined,
       cwd: options.cwd ?? "/test/project",
       baseDir,
       ...derivedPaths,
@@ -666,6 +668,7 @@ describe("WebSocket Server", () => {
       Layer.provideMerge(runtimeLayer),
       Layer.provideMerge(providerRegistryLayer),
       Layer.provideMerge(openLayer),
+      Layer.provideMerge(WebPushService.layerTest),
       Layer.provideMerge(ServerSettingsService.layerTest(options.serverSettings)),
       Layer.provideMerge(serverConfigLayer),
       Layer.provideMerge(AnalyticsService.layerTest),

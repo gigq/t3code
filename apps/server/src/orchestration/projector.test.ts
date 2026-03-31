@@ -132,6 +132,92 @@ describe("orchestration projector", () => {
     ).rejects.toBeDefined();
   });
 
+  it("applies thread.turn-completed events to latestTurn", async () => {
+    const createdAt = "2026-03-30T00:00:00.000Z";
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: createdAt,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+    const withRunningTurn = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.session-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: "2026-03-30T00:00:01.000Z",
+          commandId: "cmd-session-running",
+          payload: {
+            threadId: "thread-1",
+            session: {
+              threadId: "thread-1",
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: "turn-1",
+              lastError: null,
+              updatedAt: "2026-03-30T00:00:01.000Z",
+            },
+          },
+        }),
+      ),
+    );
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        withRunningTurn,
+        makeEvent({
+          sequence: 3,
+          type: "thread.turn-completed",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: "2026-03-30T00:00:02.000Z",
+          commandId: "cmd-turn-complete",
+          payload: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            assistantMessageId: "assistant-1",
+            state: "completed",
+            completedAt: "2026-03-30T00:00:02.000Z",
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.latestTurn).toEqual({
+      turnId: "turn-1",
+      state: "completed",
+      requestedAt: "2026-03-30T00:00:01.000Z",
+      startedAt: "2026-03-30T00:00:01.000Z",
+      completedAt: "2026-03-30T00:00:02.000Z",
+      assistantMessageId: "assistant-1",
+    });
+  });
+
   it("applies thread.archived and thread.unarchived events", async () => {
     const now = new Date().toISOString();
     const later = new Date(Date.parse(now) + 1_000).toISOString();

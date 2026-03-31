@@ -406,6 +406,46 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards web push notification methods to the websocket notifications methods", async () => {
+    requestMock.mockResolvedValue(undefined);
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.notifications.getWebPushConfig();
+    await api.notifications.upsertWebPushSubscription({
+      endpoint: "https://push.example/subscription",
+      expirationTime: null,
+      keys: {
+        p256dh: "p256dh-key",
+        auth: "auth-key",
+      },
+    });
+    await api.notifications.removeWebPushSubscription({
+      endpoint: "https://push.example/subscription",
+    });
+
+    expect(requestMock).toHaveBeenNthCalledWith(1, WS_METHODS.notificationsGetWebPushConfig);
+    expect(requestMock).toHaveBeenNthCalledWith(
+      2,
+      WS_METHODS.notificationsUpsertWebPushSubscription,
+      {
+        endpoint: "https://push.example/subscription",
+        expirationTime: null,
+        keys: {
+          p256dh: "p256dh-key",
+          auth: "auth-key",
+        },
+      },
+    );
+    expect(requestMock).toHaveBeenNthCalledWith(
+      3,
+      WS_METHODS.notificationsRemoveWebPushSubscription,
+      {
+        endpoint: "https://push.example/subscription",
+      },
+    );
+  });
+
   it("forwards context menu metadata to desktop bridge", async () => {
     const showContextMenu = vi.fn().mockResolvedValue("delete");
     Object.defineProperty(getWindowForTest(), "desktopBridge", {

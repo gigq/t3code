@@ -87,6 +87,11 @@ import {
   buildImportedThreadTitle,
 } from "./orchestration/importCodexThread.ts";
 import { toOrchestrationSession } from "./orchestration/providerSession.ts";
+import { WebPushService } from "./notifications/Services/WebPushService";
+import {
+  buildThreadCompletionNotification,
+  isThreadCompletionNotificationEvent,
+} from "./notifications/threadCompletionNotification";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -227,7 +232,8 @@ export type ServerRuntimeServices =
   | Keybindings
   | ServerSettingsService
   | Open
-  | AnalyticsService;
+  | AnalyticsService
+  | WebPushService;
 
 export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
@@ -772,13 +778,48 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
   const providerService = yield* ProviderService;
+  const webPushService = yield* WebPushService;
   const { openInEditor } = yield* Open;
+  yield* webPushService.start.pipe(
+    Effect.mapError(
+      (cause) => new ServerLifecycleError({ operation: "webPushServiceStart", cause }),
+    ),
+  );
 
   const subscriptionsScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(subscriptionsScope, Exit.void));
 
   yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
     pushBus.publishAll(ORCHESTRATION_WS_CHANNELS.domainEvent, event),
+  ).pipe(Effect.forkIn(subscriptionsScope));
+
+  yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
+    Effect.gen(function* () {
+      if (!isThreadCompletionNotificationEvent(event)) {
+        return;
+      }
+
+      const snapshot = yield* projectionReadModelQuery.getSnapshot();
+      const notification = buildThreadCompletionNotification(event, snapshot);
+      if (!notification) {
+        yield* Effect.logInfo("thread completion notification skipped after snapshot lookup", {
+          threadId: event.payload.threadId,
+          turnId: event.payload.turnId,
+          assistantMessageId: event.payload.assistantMessageId,
+          eventType: event.type,
+        });
+        return;
+      }
+      yield* Effect.logInfo("thread completion notification queued", {
+        threadId: event.payload.threadId,
+        turnId: event.payload.turnId,
+        assistantMessageId: event.payload.assistantMessageId,
+        title: notification.title,
+        tag: notification.tag,
+        urlPath: notification.urlPath,
+      });
+      yield* webPushService.sendThreadCompletionNotification(notification);
+    }),
   ).pipe(Effect.forkIn(subscriptionsScope));
 
   yield* Stream.runForEach(keybindingsManager.streamChanges, (event) =>
@@ -1061,6 +1102,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.terminalClose: {
         const body = stripRequestTag(request.body);
         return yield* terminalManager.close(body);
+      }
+
+      case WS_METHODS.notificationsGetWebPushConfig: {
+        return yield* webPushService.getWebPushConfig;
+      }
+
+      case WS_METHODS.notificationsUpsertWebPushSubscription: {
+        const body = stripRequestTag(request.body);
+        return yield* webPushService.upsertWebPushSubscription(body);
+      }
+
+      case WS_METHODS.notificationsRemoveWebPushSubscription: {
+        const body = stripRequestTag(request.body);
+        return yield* webPushService.removeWebPushSubscription(body);
       }
 
       case WS_METHODS.serverGetConfig: {

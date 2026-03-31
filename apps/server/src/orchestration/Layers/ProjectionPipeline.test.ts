@@ -169,6 +169,123 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 });
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-turn-completed-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("projects thread.turn-completed into thread and turn rows", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-03-31T16:00:00.000Z";
+        const completedAt = "2026-03-31T16:00:05.000Z";
+        const projectId = ProjectId.makeUnsafe("project-turn-completed");
+        const threadId = ThreadId.makeUnsafe("thread-turn-completed");
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.makeUnsafe("evt-turn-completed-project"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-turn-completed-project"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-turn-completed-project"),
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Project",
+            workspaceRoot: "/tmp/project",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.makeUnsafe("evt-turn-completed-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-turn-completed-thread"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-turn-completed-thread"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: "Thread",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.turn-completed",
+          eventId: EventId.makeUnsafe("evt-turn-completed"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: completedAt,
+          commandId: CommandId.makeUnsafe("cmd-turn-completed"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-turn-completed"),
+          metadata: {},
+          payload: {
+            threadId,
+            turnId: TurnId.makeUnsafe("turn-1"),
+            assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+            state: "completed",
+            completedAt,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const threadRows = yield* sql<{
+          readonly latestTurnId: string | null;
+        }>`
+          SELECT latest_turn_id AS "latestTurnId"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+        assert.deepEqual(threadRows, [{ latestTurnId: "turn-1" }]);
+
+        const turnRows = yield* sql<{
+          readonly turnId: string;
+          readonly assistantMessageId: string | null;
+          readonly state: string;
+          readonly completedAt: string | null;
+        }>`
+          SELECT
+            turn_id AS "turnId",
+            assistant_message_id AS "assistantMessageId",
+            state AS "state",
+            completed_at AS "completedAt"
+          FROM projection_turns
+          WHERE thread_id = ${threadId}
+        `;
+        assert.deepEqual(turnRows, [
+          {
+            turnId: "turn-1",
+            assistantMessageId: "assistant-1",
+            state: "completed",
+            completedAt,
+          },
+        ]);
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {

@@ -26,6 +26,10 @@ import { migrateLocalSettingsToServer } from "../hooks/useSettings";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import {
+  parseThreadIdFromNotificationUrlPath,
+  THREAD_COMPLETION_NOTIFICATION_CLICKED_MESSAGE_TYPE,
+} from "../lib/webPush";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -315,6 +319,32 @@ function EventRouter() {
     const unsubProvidersUpdated = onServerProvidersUpdated(() => {
       void queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() });
     });
+    const handleServiceWorkerMessage = (messageEvent: MessageEvent) => {
+      const data =
+        typeof messageEvent.data === "object" && messageEvent.data !== null
+          ? messageEvent.data
+          : null;
+      if (
+        !data ||
+        !("type" in data) ||
+        data.type !== THREAD_COMPLETION_NOTIFICATION_CLICKED_MESSAGE_TYPE ||
+        !("urlPath" in data) ||
+        typeof data.urlPath !== "string"
+      ) {
+        return;
+      }
+
+      const threadId = parseThreadIdFromNotificationUrlPath(data.urlPath);
+      if (!threadId) {
+        return;
+      }
+
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+      });
+    };
+    navigator.serviceWorker?.addEventListener("message", handleServiceWorkerMessage);
     subscribed = true;
     return () => {
       disposed = true;
@@ -325,6 +355,7 @@ function EventRouter() {
       unsubWelcome();
       unsubServerConfigUpdated();
       unsubProvidersUpdated();
+      navigator.serviceWorker?.removeEventListener("message", handleServiceWorkerMessage);
     };
   }, [
     navigate,

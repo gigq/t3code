@@ -584,6 +584,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.turn-completed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            latestTurnId: event.payload.turnId,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
         case "thread.turn-diff-completed": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -905,6 +920,50 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
           yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
             threadId: event.payload.threadId,
+          });
+          return;
+        }
+
+        case "thread.turn-completed": {
+          const existingTurn = yield* projectionTurnRepository.getByTurnId({
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId,
+          });
+          const nextState =
+            event.payload.state === "error"
+              ? "error"
+              : event.payload.state === "interrupted"
+                ? "interrupted"
+                : "completed";
+
+          if (Option.isSome(existingTurn)) {
+            yield* projectionTurnRepository.upsertByTurnId({
+              ...existingTurn.value,
+              assistantMessageId:
+                event.payload.assistantMessageId ?? existingTurn.value.assistantMessageId,
+              state: nextState,
+              startedAt: existingTurn.value.startedAt ?? event.payload.completedAt,
+              requestedAt: existingTurn.value.requestedAt ?? event.payload.completedAt,
+              completedAt: event.payload.completedAt,
+            });
+            return;
+          }
+
+          yield* projectionTurnRepository.upsertByTurnId({
+            turnId: event.payload.turnId,
+            threadId: event.payload.threadId,
+            pendingMessageId: null,
+            sourceProposedPlanThreadId: null,
+            sourceProposedPlanId: null,
+            assistantMessageId: event.payload.assistantMessageId,
+            state: nextState,
+            requestedAt: event.payload.completedAt,
+            startedAt: event.payload.completedAt,
+            completedAt: event.payload.completedAt,
+            checkpointTurnCount: null,
+            checkpointRef: null,
+            checkpointStatus: null,
+            checkpointFiles: [],
           });
           return;
         }

@@ -26,6 +26,7 @@ export interface ServerDerivedPaths {
   readonly dbPath: string;
   readonly keybindingsConfigPath: string;
   readonly settingsPath: string;
+  readonly webPushStatePath: string;
   readonly worktreesDir: string;
   readonly attachmentsDir: string;
   readonly logsDir: string;
@@ -44,6 +45,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly port: number;
   readonly host: string | undefined;
   readonly tls: ServerTlsConfig | undefined;
+  readonly webPushVapidSubject: string | undefined;
   readonly cwd: string;
   readonly baseDir: string;
   readonly staticDir: string | undefined;
@@ -69,6 +71,7 @@ export const deriveServerPaths = Effect.fn(function* (
     dbPath,
     keybindingsConfigPath: join(stateDir, "keybindings.json"),
     settingsPath: join(stateDir, "settings.json"),
+    webPushStatePath: join(stateDir, "web-push.json"),
     worktreesDir: join(baseDir, "worktrees"),
     attachmentsDir,
     logsDir,
@@ -113,6 +116,7 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           port: 0,
           host: undefined,
           tls: undefined,
+          webPushVapidSubject: undefined,
           authToken: undefined,
           staticDir: undefined,
           devUrl,

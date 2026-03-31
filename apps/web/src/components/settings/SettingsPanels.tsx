@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ArchiveX,
+  BellIcon,
   ChevronDownIcon,
   InfoIcon,
   LoaderIcon,
@@ -35,6 +36,7 @@ import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { useThreadCompletionNotifications } from "../../hooks/useThreadCompletionNotifications";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
   setDesktopUpdateStateQueryData,
@@ -544,6 +546,7 @@ export function GeneralSettingsPanel() {
   const refreshingRef = useRef(false);
   const queryClient = useQueryClient();
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
+  const threadCompletionNotifications = useThreadCompletionNotifications();
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -559,6 +562,56 @@ export function GeneralSettingsPanel() {
         setIsRefreshingProviders(false);
       });
   }, [queryClient]);
+
+  const handleEnableThreadCompletionNotifications = useCallback(() => {
+    void threadCompletionNotifications.enable().catch((error: unknown) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not enable notifications",
+        description: error instanceof Error ? error.message : "Notification setup failed.",
+      });
+    });
+  }, [threadCompletionNotifications]);
+
+  const handleDisableThreadCompletionNotifications = useCallback(() => {
+    void threadCompletionNotifications.disable().catch((error: unknown) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not disable notifications",
+        description: error instanceof Error ? error.message : "Notification disable failed.",
+      });
+    });
+  }, [threadCompletionNotifications]);
+
+  const threadCompletionNotificationsStatus = !threadCompletionNotifications.isSupported
+    ? {
+        headline: "Unavailable in this environment.",
+        detail:
+          "Requires HTTPS, Service Workers, and the Push API. On iOS this works only for an installed Home Screen web app.",
+      }
+    : threadCompletionNotifications.hasSubscription
+      ? {
+          headline: "Enabled.",
+          detail:
+            "T3 Code will send a system notification when an assistant turn finishes, including while the PWA is in the background.",
+        }
+      : threadCompletionNotifications.permission === "denied"
+        ? {
+            headline: "Blocked by browser permission.",
+            detail:
+              "Enable notifications for this app in browser or OS settings, then return here to subscribe again.",
+          }
+        : threadCompletionNotifications.permission === "granted"
+          ? {
+              headline: "Permission granted, subscription missing.",
+              detail:
+                "Tap Enable again to register this device for thread completion notifications.",
+            }
+          : {
+              headline: "Disabled.",
+              detail:
+                "Notifications are sent when an assistant turn completes. On iOS, add T3 Code to the Home Screen first.",
+            };
 
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
@@ -1372,6 +1425,45 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection title="Advanced">
+        <SettingsRow
+          title="Thread completion notifications"
+          description="Send a system notification when an assistant turn finishes."
+          status={
+            <>
+              <span className="block">{threadCompletionNotificationsStatus.headline}</span>
+              <span className="mt-1 block">{threadCompletionNotificationsStatus.detail}</span>
+              {threadCompletionNotifications.error ? (
+                <span className="mt-1 block text-destructive">
+                  {threadCompletionNotifications.error}
+                </span>
+              ) : null}
+            </>
+          }
+          control={
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={
+                threadCompletionNotifications.isBusy || !threadCompletionNotifications.isSupported
+              }
+              onClick={
+                threadCompletionNotifications.hasSubscription
+                  ? handleDisableThreadCompletionNotifications
+                  : handleEnableThreadCompletionNotifications
+              }
+            >
+              <BellIcon className="size-3.5" />
+              {threadCompletionNotifications.isBusy
+                ? threadCompletionNotifications.hasSubscription
+                  ? "Disabling..."
+                  : "Enabling..."
+                : threadCompletionNotifications.hasSubscription
+                  ? "Disable"
+                  : "Enable"}
+            </Button>
+          }
+        />
+
         <SettingsRow
           title="Keybindings"
           description="Open the persisted `keybindings.json` file to edit advanced bindings directly."

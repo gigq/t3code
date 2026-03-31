@@ -25,6 +25,7 @@ import * as SqlitePersistence from "./persistence/Layers/Sqlite";
 import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
+import { WebPushServiceLive } from "./notifications/Layers/WebPushService";
 import { Server } from "./wsServer";
 import { ServerLoggerLive } from "./serverLogger";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
@@ -45,6 +46,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   host: Schema.optional(Schema.String),
   tlsCertPath: Schema.optional(Schema.String),
   tlsKeyPath: Schema.optional(Schema.String),
+  webPushVapidSubject: Schema.optional(Schema.String),
   t3Home: Schema.optional(Schema.String),
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
@@ -59,6 +61,7 @@ interface CliInput {
   readonly host: Option.Option<string>;
   readonly tlsCertPath: Option.Option<string>;
   readonly tlsKeyPath: Option.Option<string>;
+  readonly webPushVapidSubject: Option.Option<string>;
   readonly t3Home: Option.Option<string>;
   readonly devUrl: Option.Option<URL>;
   readonly noBrowser: Option.Option<boolean>;
@@ -124,6 +127,10 @@ const CliEnvConfig = Config.all({
     Config.map(Option.getOrUndefined),
   ),
   tlsKeyPath: Config.string("T3CODE_TLS_KEY_PATH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  webPushVapidSubject: Config.string("T3CODE_WEB_PUSH_VAPID_SUBJECT").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
@@ -333,6 +340,15 @@ const ServerConfigLive = (input: CliInput) =>
         cwd: cliConfig.cwd,
         host,
         tls,
+        webPushVapidSubject: Option.getOrUndefined(
+          resolveOptionPrecedence(
+            input.webPushVapidSubject,
+            Option.fromUndefinedOr(env.webPushVapidSubject),
+            Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+              Option.fromUndefinedOr(bootstrap.webPushVapidSubject),
+            ),
+          ),
+        ),
         baseDir,
         ...derivedPaths,
         staticDir,
@@ -352,6 +368,7 @@ const LayerLive = (input: CliInput) =>
     Layer.provideMerge(makeServerRuntimeServicesLayer()),
     Layer.provideMerge(makeServerProviderLayer()),
     Layer.provideMerge(ProviderRegistryLive),
+    Layer.provideMerge(WebPushServiceLive),
     Layer.provideMerge(SqlitePersistence.layerConfig),
     Layer.provideMerge(ServerLoggerLive),
     Layer.provideMerge(AnalyticsServiceLayerLive),
@@ -491,6 +508,12 @@ const bootstrapFdFlag = Flag.integer("bootstrap-fd").pipe(
   Flag.withDescription("Read one-time bootstrap secrets from the given file descriptor."),
   Flag.optional,
 );
+const webPushVapidSubjectFlag = Flag.string("web-push-vapid-subject").pipe(
+  Flag.withDescription(
+    "VAPID subject used for Web Push JWTs (for example mailto:you@example.com).",
+  ),
+  Flag.optional,
+);
 const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
   Flag.withDescription(
     "Create a project for the current working directory on startup when missing.",
@@ -516,6 +539,7 @@ export const t3Cli = Command.make("t3", {
   noBrowser: noBrowserFlag,
   authToken: authTokenFlag,
   bootstrapFd: bootstrapFdFlag,
+  webPushVapidSubject: webPushVapidSubjectFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
 }).pipe(

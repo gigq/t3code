@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type {
+  OrchestrationEvent,
   OrchestrationReadModel,
   ProviderRuntimeEvent,
   ProviderSession,
@@ -325,6 +326,208 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    expect(
+      events.some(
+        (event) =>
+          event.type === "thread.turn-completed" &&
+          event.payload.threadId === "thread-1" &&
+          event.payload.turnId === "turn-1" &&
+          event.payload.state === "error",
+      ),
+    ).toBe(true);
+  });
+
+  it("synthesizes turn completion when the final assistant message completes but the provider leaves the turn running", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-fallback"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-fallback"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-fallback",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-turn-fallback-delta"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback"),
+      itemId: asItemId("item-turn-fallback"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "done",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-fallback-item-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback"),
+      itemId: asItemId("item-turn-fallback"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.latestTurn?.turnId === "turn-fallback" &&
+        entry.latestTurn?.state === "completed" &&
+        entry.latestTurn?.assistantMessageId === "assistant:item-turn-fallback",
+      5000,
+    );
+    expect(thread.latestTurn?.completedAt).not.toBeNull();
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const completionEvents = events.filter(
+      (event): event is Extract<OrchestrationEvent, { type: "thread.turn-completed" }> =>
+        event.type === "thread.turn-completed" && event.payload.turnId === "turn-fallback",
+    );
+    expect(completionEvents).toHaveLength(1);
+    expect(completionEvents[0]?.payload.assistantMessageId).toBe("assistant:item-turn-fallback");
+  });
+
+  it("cancels synthesized completion when more turn activity arrives after an interim assistant message", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-fallback-cancel"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-fallback-cancel"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-fallback-cancel",
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-fallback-cancel-item-completed-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback-cancel"),
+      itemId: asItemId("item-turn-fallback-cancel-1"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "interim",
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-turn-fallback-cancel-reasoning-started"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback-cancel"),
+      itemId: asItemId("reasoning-turn-fallback-cancel"),
+      payload: {
+        itemType: "reasoning",
+        status: "inProgress",
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 2300));
+
+    const liveThread = await Effect.runPromise(harness.engine.getReadModel()).then((readModel) => {
+      const thread = readModel.threads.find((entry) => entry.id === "thread-1");
+      if (!thread) {
+        throw new Error("Expected thread-1 to exist");
+      }
+      return thread;
+    });
+    expect(liveThread.session?.status).toBe("running");
+    expect(liveThread.session?.activeTurnId).toBe("turn-fallback-cancel");
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-fallback-cancel-reasoning-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback-cancel"),
+      itemId: asItemId("reasoning-turn-fallback-cancel"),
+      payload: {
+        itemType: "reasoning",
+        status: "completed",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-fallback-cancel-item-completed-2"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback-cancel"),
+      itemId: asItemId("item-turn-fallback-cancel-2"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "final",
+      },
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "ready" &&
+        thread.session?.activeTurnId === null &&
+        thread.latestTurn?.turnId === "turn-fallback-cancel" &&
+        thread.latestTurn?.assistantMessageId === "assistant:item-turn-fallback-cancel-2",
+      5000,
+    );
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const completionEvents = events.filter(
+      (event): event is Extract<OrchestrationEvent, { type: "thread.turn-completed" }> =>
+        event.type === "thread.turn-completed" && event.payload.turnId === "turn-fallback-cancel",
+    );
+    expect(completionEvents).toHaveLength(1);
+    expect(completionEvents[0]?.payload.assistantMessageId).toBe(
+      "assistant:item-turn-fallback-cancel-2",
+    );
   });
 
   it("applies provider session.state.changed transitions directly", async () => {

@@ -31,6 +31,11 @@ import type {
   ServerUpsertKeybindingResult,
 } from "./server";
 import type {
+  RemoveWebPushSubscriptionInput,
+  WebPushConfig,
+  WebPushSubscription,
+} from "./notifications";
+import type {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
@@ -171,6 +176,11 @@ export interface NativeApi {
       items: readonly ContextMenuItem<T>[],
       position?: { x: number; y: number },
     ) => Promise<T | null>;
+  };
+  notifications: {
+    getWebPushConfig: () => Promise<WebPushConfig>;
+    upsertWebPushSubscription: (input: WebPushSubscription) => Promise<void>;
+    removeWebPushSubscription: (input: RemoveWebPushSubscriptionInput) => Promise<void>;
   };
   server: {
     getConfig: () => Promise<ServerConfig>;
