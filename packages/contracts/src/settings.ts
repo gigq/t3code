@@ -74,7 +74,7 @@ export type ClaudeSettings = typeof ClaudeSettings.Type;
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
-    Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
+    Schema.withDecodingDefault(() => "worktree" as const satisfies ThreadEnvMode),
   ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({

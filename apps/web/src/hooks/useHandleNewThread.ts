@@ -8,10 +8,12 @@ import {
 } from "../composerDraftStore";
 import { newThreadId } from "../lib/utils";
 import { useStore } from "../store";
+import { useSettings } from "./useSettings";
 
 export function useHandleNewThread() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
+  const appSettings = useSettings();
   const navigate = useNavigate();
   const routeThreadId = useParams({
     strict: false,
@@ -94,7 +96,7 @@ export function useHandleNewThread() {
           createdAt,
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
-          envMode: options?.envMode ?? "local",
+          envMode: options?.envMode ?? appSettings.defaultThreadEnvMode,
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
         applyStickyState(threadId);
@@ -105,7 +107,7 @@ export function useHandleNewThread() {
         });
       })();
     },
-    [navigate, routeThreadId],
+    [appSettings.defaultThreadEnvMode, navigate, routeThreadId],
   );
 
   return {
