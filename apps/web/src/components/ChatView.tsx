@@ -175,6 +175,7 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   SendPhase,
+  shouldResetSendPhaseFromLatestTurn,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 
@@ -2173,6 +2174,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return;
     }
     if (
+      shouldResetSendPhaseFromLatestTurn({
+        sendPhase,
+        sendStartedAt,
+        latestTurn: activeLatestTurn,
+      })
+    ) {
+      resetSendPhase();
+      return;
+    }
+    if (
       phase === "running" ||
       activePendingApproval !== null ||
       activePendingUserInput !== null ||
@@ -2184,8 +2195,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activePendingApproval,
     activePendingUserInput,
     activeThread?.error,
+    activeLatestTurn,
     phase,
     resetSendPhase,
+    sendStartedAt,
     sendPhase,
   ]);
 

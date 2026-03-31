@@ -42,6 +42,18 @@ function completionStateToLatestTurnState(state: "completed" | "interrupted" | "
   return state;
 }
 
+function completionStateToSessionStatus(state: "completed" | "interrupted" | "error") {
+  switch (state) {
+    case "error":
+      return "error" as const;
+    case "interrupted":
+      return "interrupted" as const;
+    case "completed":
+    default:
+      return "ready" as const;
+  }
+}
+
 function updateThread(
   threads: ReadonlyArray<OrchestrationThread>,
   threadId: ThreadId,
@@ -520,6 +532,15 @@ export function projectEvent(
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
+            session: thread.session
+              ? {
+                  ...thread.session,
+                  status: completionStateToSessionStatus(payload.state),
+                  activeTurnId: null,
+                  lastError: payload.state === "error" ? thread.session.lastError : null,
+                  updatedAt: payload.completedAt,
+                }
+              : thread.session,
             latestTurn: {
               turnId: payload.turnId,
               state: completionStateToLatestTurnState(payload.state),

@@ -815,17 +815,38 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const applyThreadSessionsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadSessionsProjection",
     )(function* (event, _attachmentSideEffects) {
-      if (event.type !== "thread.session-set") {
+      if (event.type === "thread.session-set") {
+        yield* projectionThreadSessionRepository.upsert({
+          threadId: event.payload.threadId,
+          status: event.payload.session.status,
+          providerName: event.payload.session.providerName,
+          runtimeMode: event.payload.session.runtimeMode,
+          activeTurnId: event.payload.session.activeTurnId,
+          lastError: event.payload.session.lastError,
+          updatedAt: event.payload.session.updatedAt,
+        });
+        return;
+      }
+      if (event.type !== "thread.turn-completed") {
+        return;
+      }
+      const existing = yield* projectionThreadSessionRepository.getByThreadId({
+        threadId: event.payload.threadId,
+      });
+      if (Option.isNone(existing)) {
         return;
       }
       yield* projectionThreadSessionRepository.upsert({
-        threadId: event.payload.threadId,
-        status: event.payload.session.status,
-        providerName: event.payload.session.providerName,
-        runtimeMode: event.payload.session.runtimeMode,
-        activeTurnId: event.payload.session.activeTurnId,
-        lastError: event.payload.session.lastError,
-        updatedAt: event.payload.session.updatedAt,
+        ...existing.value,
+        status:
+          event.payload.state === "error"
+            ? "error"
+            : event.payload.state === "interrupted"
+              ? "interrupted"
+              : "ready",
+        activeTurnId: null,
+        lastError: event.payload.state === "error" ? existing.value.lastError : null,
+        updatedAt: event.payload.completedAt,
       });
     });
 

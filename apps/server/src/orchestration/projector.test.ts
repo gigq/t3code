@@ -132,7 +132,7 @@ describe("orchestration projector", () => {
     ).rejects.toBeDefined();
   });
 
-  it("applies thread.turn-completed events to latestTurn", async () => {
+  it("applies thread.turn-completed events to latestTurn and clears the active session turn", async () => {
     const createdAt = "2026-03-30T00:00:00.000Z";
     const afterCreate = await Effect.runPromise(
       projectEvent(
@@ -215,6 +215,15 @@ describe("orchestration projector", () => {
       startedAt: "2026-03-30T00:00:01.000Z",
       completedAt: "2026-03-30T00:00:02.000Z",
       assistantMessageId: "assistant-1",
+    });
+    expect(next.threads[0]?.session).toEqual({
+      threadId: "thread-1",
+      status: "ready",
+      providerName: "codex",
+      runtimeMode: "full-access",
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: "2026-03-30T00:00:02.000Z",
     });
   });
 

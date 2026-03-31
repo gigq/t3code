@@ -1,4 +1,9 @@
-import { ProjectId, type ModelSelection, type ThreadId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  type ModelSelection,
+  type OrchestrationLatestTurn,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { type ChatMessage, type Thread } from "../types";
 import { randomUUID } from "~/lib/utils";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
@@ -76,6 +81,30 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
 }
 
 export type SendPhase = "idle" | "preparing-worktree" | "sending-turn";
+
+export function shouldResetSendPhaseFromLatestTurn(input: {
+  readonly sendPhase: SendPhase;
+  readonly sendStartedAt: string | null;
+  readonly latestTurn: Pick<OrchestrationLatestTurn, "startedAt" | "completedAt"> | null;
+}): boolean {
+  if (input.sendPhase === "idle" || !input.sendStartedAt) {
+    return false;
+  }
+  if (!input.latestTurn?.startedAt || !input.latestTurn.completedAt) {
+    return false;
+  }
+  const sendStartedAt = Date.parse(input.sendStartedAt);
+  const latestTurnStartedAt = Date.parse(input.latestTurn.startedAt);
+  const latestTurnCompletedAt = Date.parse(input.latestTurn.completedAt);
+  if (
+    Number.isNaN(sendStartedAt) ||
+    Number.isNaN(latestTurnStartedAt) ||
+    Number.isNaN(latestTurnCompletedAt)
+  ) {
+    return false;
+  }
+  return latestTurnStartedAt >= sendStartedAt && latestTurnCompletedAt >= sendStartedAt;
+}
 
 export interface PullRequestDialogState {
   initialReference: string | null;

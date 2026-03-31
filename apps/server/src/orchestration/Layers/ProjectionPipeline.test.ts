@@ -259,6 +259,18 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-turn-completed-
         `;
         assert.deepEqual(threadRows, [{ latestTurnId: "turn-1" }]);
 
+        const sessionRows = yield* sql<{
+          readonly status: string;
+          readonly activeTurnId: string | null;
+        }>`
+          SELECT
+            status AS "status",
+            active_turn_id AS "activeTurnId"
+          FROM projection_thread_sessions
+          WHERE thread_id = ${threadId}
+        `;
+        assert.deepEqual(sessionRows, []);
+
         const turnRows = yield* sql<{
           readonly turnId: string;
           readonly assistantMessageId: string | null;
@@ -279,6 +291,135 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-turn-completed-
             assistantMessageId: "assistant-1",
             state: "completed",
             completedAt,
+          },
+        ]);
+      }),
+    );
+  },
+);
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-turn-completed-session-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("clears projected session active turn on thread.turn-completed", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-03-31T17:00:00.000Z";
+        const completedAt = "2026-03-31T17:00:05.000Z";
+        const projectId = ProjectId.makeUnsafe("project-turn-completed-session");
+        const threadId = ThreadId.makeUnsafe("thread-turn-completed-session");
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.makeUnsafe("evt-turn-completed-session-project"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-turn-completed-session-project"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-turn-completed-session-project"),
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Project",
+            workspaceRoot: "/tmp/project",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.makeUnsafe("evt-turn-completed-session-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-turn-completed-session-thread"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-turn-completed-session-thread"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: "Thread",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.session-set",
+          eventId: EventId.makeUnsafe("evt-turn-completed-session-running"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-turn-completed-session-running"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-turn-completed-session-running"),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: TurnId.makeUnsafe("turn-1"),
+              lastError: null,
+              updatedAt: now,
+            },
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.turn-completed",
+          eventId: EventId.makeUnsafe("evt-turn-completed-session-complete"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: completedAt,
+          commandId: CommandId.makeUnsafe("cmd-turn-completed-session-complete"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-turn-completed-session-complete"),
+          metadata: {},
+          payload: {
+            threadId,
+            turnId: TurnId.makeUnsafe("turn-1"),
+            assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+            state: "completed",
+            completedAt,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const sessionRows = yield* sql<{
+          readonly status: string;
+          readonly activeTurnId: string | null;
+          readonly updatedAt: string;
+        }>`
+          SELECT
+            status AS "status",
+            active_turn_id AS "activeTurnId",
+            updated_at AS "updatedAt"
+          FROM projection_thread_sessions
+          WHERE thread_id = ${threadId}
+        `;
+        assert.deepEqual(sessionRows, [
+          {
+            status: "ready",
+            activeTurnId: null,
+            updatedAt: completedAt,
           },
         ]);
       }),

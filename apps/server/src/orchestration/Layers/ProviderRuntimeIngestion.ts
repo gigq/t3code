@@ -157,6 +157,48 @@ function orchestrationSessionStatusFromRuntimeState(
   }
 }
 
+function nextActiveTurnIdForLifecycleEvent(input: {
+  readonly event:
+    | Extract<ProviderRuntimeEvent, { type: "session.started" }>
+    | Extract<ProviderRuntimeEvent, { type: "session.state.changed" }>
+    | Extract<ProviderRuntimeEvent, { type: "session.exited" }>
+    | Extract<ProviderRuntimeEvent, { type: "thread.started" }>
+    | Extract<ProviderRuntimeEvent, { type: "turn.started" }>
+    | Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
+  readonly activeTurnId: TurnId | null;
+  readonly currentSessionStatus:
+    | "starting"
+    | "running"
+    | "ready"
+    | "idle"
+    | "interrupted"
+    | "stopped"
+    | "error"
+    | null;
+  readonly eventTurnId: TurnId | undefined;
+}): TurnId | null {
+  switch (input.event.type) {
+    case "turn.started":
+      return input.eventTurnId ?? null;
+    case "turn.completed":
+    case "session.exited":
+      return null;
+    case "session.state.changed": {
+      const nextStatus = orchestrationSessionStatusFromRuntimeState(input.event.payload.state);
+      if (nextStatus === "running") {
+        return input.activeTurnId;
+      }
+      if (nextStatus === "starting" && input.currentSessionStatus === "running") {
+        return input.activeTurnId;
+      }
+      return null;
+    }
+    case "session.started":
+    case "thread.started":
+      return input.currentSessionStatus === "running" ? input.activeTurnId : null;
+  }
+}
+
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
 ): "command" | "file-read" | "file-change" | undefined {
@@ -1088,12 +1130,12 @@ const make = Effect.fn("make")(function* () {
       event.type === "turn.started" ||
       event.type === "turn.completed"
     ) {
-      const nextActiveTurnId =
-        event.type === "turn.started"
-          ? (eventTurnId ?? null)
-          : event.type === "turn.completed" || event.type === "session.exited"
-            ? null
-            : activeTurnId;
+      const nextActiveTurnId = nextActiveTurnIdForLifecycleEvent({
+        event,
+        activeTurnId,
+        currentSessionStatus: thread.session?.status ?? null,
+        eventTurnId,
+      });
       const status = (() => {
         switch (event.type) {
           case "session.state.changed":
@@ -1108,7 +1150,7 @@ const make = Effect.fn("make")(function* () {
           case "thread.started":
             // Provider thread/session start notifications can arrive during an
             // active turn; preserve turn-running state in that case.
-            return activeTurnId !== null ? "running" : "ready";
+            return thread.session?.status === "running" ? "running" : "ready";
         }
       })();
       const lastError =
@@ -1281,7 +1323,7 @@ const make = Effect.fn("make")(function* () {
       });
     }
 
-    if (event.type === "turn.completed") {
+    if (event.type === "turn.completed" && shouldApplyThreadLifecycle) {
       const turnId = toTurnId(event.turnId);
       if (turnId) {
         const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
