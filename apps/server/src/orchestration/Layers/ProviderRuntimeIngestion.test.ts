@@ -165,6 +165,7 @@ type ProviderRuntimeTestMessage = ProviderRuntimeTestThread["messages"][number];
 type ProviderRuntimeTestProposedPlan = ProviderRuntimeTestThread["proposedPlans"][number];
 type ProviderRuntimeTestActivity = ProviderRuntimeTestThread["activities"][number];
 type ProviderRuntimeTestCheckpoint = ProviderRuntimeTestThread["checkpoints"][number];
+const originalTurnCompletionFallbackDelayMs = process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS;
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
@@ -181,6 +182,11 @@ describe("ProviderRuntimeIngestion", () => {
   }
 
   afterEach(async () => {
+    if (originalTurnCompletionFallbackDelayMs === undefined) {
+      delete process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS;
+    } else {
+      process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = originalTurnCompletionFallbackDelayMs;
+    }
     if (scope) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
@@ -344,6 +350,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("synthesizes turn completion when the final assistant message completes but the provider leaves the turn running", async () => {
+    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "100";
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -397,7 +404,7 @@ describe("ProviderRuntimeIngestion", () => {
         entry.latestTurn?.turnId === "turn-fallback" &&
         entry.latestTurn?.state === "completed" &&
         entry.latestTurn?.assistantMessageId === "assistant:item-turn-fallback",
-      5000,
+      1000,
     );
     expect(thread.latestTurn?.completedAt).not.toBeNull();
 
@@ -415,6 +422,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("cancels synthesized completion when more turn activity arrives after an interim assistant message", async () => {
+    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "200";
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -449,7 +457,7 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     harness.emit({
       type: "item.started",
@@ -465,7 +473,7 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 2300));
+    await new Promise((resolve) => setTimeout(resolve, 120));
 
     const liveThread = await Effect.runPromise(harness.engine.getReadModel()).then((readModel) => {
       const thread = readModel.threads.find((entry) => entry.id === "thread-1");
@@ -512,7 +520,7 @@ describe("ProviderRuntimeIngestion", () => {
         thread.session?.activeTurnId === null &&
         thread.latestTurn?.turnId === "turn-fallback-cancel" &&
         thread.latestTurn?.assistantMessageId === "assistant:item-turn-fallback-cancel-2",
-      5000,
+      1000,
     );
 
     const events = await Effect.runPromise(
@@ -528,6 +536,151 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completionEvents[0]?.payload.assistantMessageId).toBe(
       "assistant:item-turn-fallback-cancel-2",
     );
+  });
+
+  it("waits for in-flight tool items to finish before synthesizing turn completion", async () => {
+    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "150";
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-fallback-tool"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-fallback-tool"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-fallback-tool",
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-fallback-tool-assistant-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback-tool"),
+      itemId: asItemId("item-turn-fallback-tool-assistant"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "draft",
+      },
+    });
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-turn-fallback-tool-command-started"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback-tool"),
+      itemId: asItemId("item-turn-fallback-tool-command"),
+      payload: {
+        itemType: "command_execution",
+        status: "inProgress",
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 220));
+
+    const liveThread = await Effect.runPromise(harness.engine.getReadModel()).then((readModel) => {
+      const thread = readModel.threads.find((entry) => entry.id === "thread-1");
+      if (!thread) {
+        throw new Error("Expected thread-1 to exist");
+      }
+      return thread;
+    });
+    expect(liveThread.session?.status).toBe("running");
+    expect(liveThread.session?.activeTurnId).toBe("turn-fallback-tool");
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-fallback-tool-command-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-fallback-tool"),
+      itemId: asItemId("item-turn-fallback-tool-command"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+      },
+    });
+
+    const completedThread = await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "ready" &&
+        thread.session?.activeTurnId === null &&
+        thread.latestTurn?.turnId === "turn-fallback-tool" &&
+        thread.latestTurn?.assistantMessageId === "assistant:item-turn-fallback-tool-assistant",
+      1000,
+    );
+    expect(completedThread.latestTurn?.state).toBe("completed");
+  });
+
+  it("synthesizes turn completion immediately when the provider session becomes ready", async () => {
+    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "60000";
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-session-ready"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-session-ready"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-session-ready",
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-session-ready-assistant-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-session-ready"),
+      itemId: asItemId("item-turn-session-ready-assistant"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "done",
+      },
+    });
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-turn-session-ready-ready"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        state: "ready",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.latestTurn?.turnId === "turn-session-ready" &&
+        entry.latestTurn?.assistantMessageId === "assistant:item-turn-session-ready-assistant",
+      1000,
+    );
+    expect(thread.latestTurn?.state).toBe("completed");
   });
 
   it("applies provider session.state.changed transitions directly", async () => {

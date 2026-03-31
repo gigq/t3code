@@ -43,17 +43,30 @@ function resolveNotificationTitle(projectTitle: string | null, threadTitle: stri
 function resolveAssistantMessageText(
   snapshot: OrchestrationReadModel,
   threadId: string,
+  turnId: string,
   assistantMessageId: MessageId | null,
 ): string {
-  if (assistantMessageId === null) {
-    return "Assistant finished responding.";
-  }
   const thread = snapshot.threads.find(
     (candidate) => candidate.id === threadId && candidate.deletedAt === null,
   );
-  const message = thread?.messages.find(
-    (candidate) => candidate.id === assistantMessageId && candidate.role === "assistant",
-  );
+  if (!thread) {
+    return "Assistant finished responding.";
+  }
+
+  const message =
+    (assistantMessageId !== null
+      ? thread.messages.find(
+          (candidate) => candidate.id === assistantMessageId && candidate.role === "assistant",
+        )
+      : undefined) ??
+    [...thread.messages]
+      .filter((candidate) => candidate.role === "assistant" && candidate.turnId === turnId)
+      .toSorted(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          right.createdAt.localeCompare(left.createdAt),
+      )[0];
+
   return normalizeNotificationBody(message?.text ?? "");
 }
 
@@ -78,6 +91,7 @@ export function buildThreadCompletionNotification(
     body: resolveAssistantMessageText(
       snapshot,
       event.payload.threadId,
+      event.payload.turnId,
       event.payload.assistantMessageId,
     ),
     tag: `thread-completed:${event.payload.turnId}`,

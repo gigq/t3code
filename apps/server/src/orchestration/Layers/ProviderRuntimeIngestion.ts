@@ -39,8 +39,18 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
-const TURN_COMPLETION_FALLBACK_DELAY = Duration.seconds(2);
+const DEFAULT_TURN_COMPLETION_FALLBACK_DELAY_MS = 20_000;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
+
+function getTurnCompletionFallbackDelay(): Duration.Duration {
+  const rawValue = process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS;
+  const parsedValue = rawValue === undefined ? Number.NaN : Number.parseInt(rawValue, 10);
+  return Duration.millis(
+    Number.isFinite(parsedValue) && parsedValue > 0
+      ? parsedValue
+      : DEFAULT_TURN_COMPLETION_FALLBACK_DELAY_MS,
+  );
+}
 
 type TurnStartRequestedDomainEvent = Extract<
   OrchestrationEvent,
@@ -97,6 +107,23 @@ function proposedPlanIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId
     return `plan:${threadId}:item:${event.itemId}`;
   }
   return `plan:${threadId}:event:${event.eventId}`;
+}
+
+function isMeaningfulTurnCompletionFallbackActivity(event: ProviderRuntimeEvent): boolean {
+  if (event.turnId === undefined) {
+    return false;
+  }
+  switch (event.type) {
+    case "thread.token-usage.updated":
+    case "turn.completed":
+    case "request.opened":
+    case "request.resolved":
+    case "user-input.requested":
+    case "user-input.resolved":
+      return false;
+    default:
+      return true;
+  }
 }
 
 function buildContextWindowActivityPayload(
@@ -867,16 +894,65 @@ const make = Effect.fn("make")(function* () {
         completedTurnKeys.delete(key);
       }
     }
+    for (const key of Array.from(turnCompletionTrackingByTurnKey.keys())) {
+      if (key.startsWith(prefix)) {
+        turnCompletionTrackingByTurnKey.delete(key);
+      }
+    }
   });
 
   const pendingTurnCompletionFallbacks = new Map<
     string,
     {
       fiber: Fiber.Fiber<void, never>;
-      assistantMessageId: MessageId;
+      assistantMessageId: MessageId | null;
+      activitySequence: number;
+    }
+  >();
+  const turnCompletionTrackingByTurnKey = new Map<
+    string,
+    {
+      assistantMessageId: MessageId | null;
+      activitySequence: number;
+      activeToolItemIds: Set<string>;
     }
   >();
   const completedTurnKeys = new Set<string>();
+
+  const getOrCreateTurnCompletionTracking = (
+    threadId: ThreadId,
+    turnId: TurnId,
+  ): {
+    assistantMessageId: MessageId | null;
+    activitySequence: number;
+    activeToolItemIds: Set<string>;
+  } => {
+    const key = providerTurnKey(threadId, turnId);
+    const existing = turnCompletionTrackingByTurnKey.get(key);
+    if (existing) {
+      return existing;
+    }
+    const created = {
+      assistantMessageId: null,
+      activitySequence: 0,
+      activeToolItemIds: new Set<string>(),
+    };
+    turnCompletionTrackingByTurnKey.set(key, created);
+    return created;
+  };
+
+  const clearTurnCompletionTracking = Effect.fn("clearTurnCompletionTracking")(function* (
+    threadId: ThreadId,
+    turnId: TurnId,
+  ) {
+    const key = providerTurnKey(threadId, turnId);
+    const pending = pendingTurnCompletionFallbacks.get(key);
+    pendingTurnCompletionFallbacks.delete(key);
+    if (pending) {
+      yield* Fiber.interrupt(pending.fiber);
+    }
+    turnCompletionTrackingByTurnKey.delete(key);
+  });
 
   const cancelPendingTurnCompletionFallback = Effect.fn("cancelPendingTurnCompletionFallback")(
     function* (threadId: ThreadId, turnId: TurnId) {
@@ -920,22 +996,28 @@ const make = Effect.fn("make")(function* () {
       event: ProviderRuntimeEvent;
       threadId: ThreadId;
       turnId: TurnId;
-      assistantMessageId: MessageId;
-      completedAt: string;
+      assistantMessageId: MessageId | null;
+      activitySequence: number;
     }) {
       yield* cancelPendingTurnCompletionFallback(input.threadId, input.turnId);
       const key = providerTurnKey(input.threadId, input.turnId);
       const fiber = yield* Effect.gen(function* () {
-        yield* Effect.sleep(TURN_COMPLETION_FALLBACK_DELAY);
+        yield* Effect.sleep(getTurnCompletionFallbackDelay());
         const readModel = yield* orchestrationEngine.getReadModel();
         const thread = readModel.threads.find((entry) => entry.id === input.threadId);
+        const tracking = turnCompletionTrackingByTurnKey.get(key);
         if (
           !thread ||
           thread.session?.status !== "running" ||
-          !sameId(thread.session.activeTurnId, input.turnId)
+          !sameId(thread.session.activeTurnId, input.turnId) ||
+          !tracking ||
+          tracking.activitySequence !== input.activitySequence ||
+          tracking.activeToolItemIds.size > 0
         ) {
           return;
         }
+
+        const completedAt = new Date().toISOString();
 
         yield* dispatchThreadTurnCompleted({
           event: input.event,
@@ -943,7 +1025,7 @@ const make = Effect.fn("make")(function* () {
           turnId: input.turnId,
           assistantMessageId: input.assistantMessageId,
           state: "completed",
-          completedAt: input.completedAt,
+          completedAt,
         });
         yield* orchestrationEngine.dispatch({
           type: "thread.session.set",
@@ -956,15 +1038,16 @@ const make = Effect.fn("make")(function* () {
             runtimeMode: thread.session.runtimeMode,
             activeTurnId: null,
             lastError: null,
-            updatedAt: input.completedAt,
+            updatedAt: completedAt,
           },
-          createdAt: input.completedAt,
+          createdAt: completedAt,
         });
         yield* Effect.logInfo("provider runtime ingestion synthesized missing turn completion", {
           threadId: input.threadId,
           turnId: input.turnId,
           assistantMessageId: input.assistantMessageId,
         });
+        yield* clearTurnCompletionTracking(input.threadId, input.turnId);
       })
         .pipe(
           Effect.catchCause((cause) =>
@@ -988,6 +1071,58 @@ const make = Effect.fn("make")(function* () {
       pendingTurnCompletionFallbacks.set(key, {
         fiber,
         assistantMessageId: input.assistantMessageId,
+        activitySequence: input.activitySequence,
+      });
+    },
+  );
+
+  const updateTurnCompletionTrackingForEvent = Effect.fn("updateTurnCompletionTrackingForEvent")(
+    function* (event: ProviderRuntimeEvent, threadId: ThreadId, turnId: TurnId) {
+      const tracking = getOrCreateTurnCompletionTracking(threadId, turnId);
+      if (
+        event.itemId &&
+        "payload" in event &&
+        event.payload &&
+        typeof event.payload === "object"
+      ) {
+        if (
+          "itemType" in event.payload &&
+          typeof event.payload.itemType === "string" &&
+          isToolLifecycleItemType(event.payload.itemType)
+        ) {
+          if (event.type === "item.started") {
+            tracking.activeToolItemIds.add(event.itemId);
+          } else if (event.type === "item.completed") {
+            tracking.activeToolItemIds.delete(event.itemId);
+          } else if (
+            event.type === "item.updated" &&
+            "status" in event.payload &&
+            typeof event.payload.status === "string"
+          ) {
+            if (event.payload.status === "inProgress") {
+              tracking.activeToolItemIds.add(event.itemId);
+            } else {
+              tracking.activeToolItemIds.delete(event.itemId);
+            }
+          }
+        }
+      }
+
+      if (!isMeaningfulTurnCompletionFallbackActivity(event)) {
+        return;
+      }
+
+      tracking.activitySequence += 1;
+      if (tracking.assistantMessageId === null) {
+        return;
+      }
+
+      yield* schedulePendingTurnCompletionFallback({
+        event,
+        threadId,
+        turnId,
+        assistantMessageId: tracking.assistantMessageId,
+        activitySequence: tracking.activitySequence,
       });
     },
   );
@@ -1112,13 +1247,9 @@ const make = Effect.fn("make")(function* () {
         : null;
 
     if (eventTurnId) {
+      yield* updateTurnCompletionTrackingForEvent(event, thread.id, eventTurnId);
       if (event.type === "turn.completed") {
-        yield* cancelPendingTurnCompletionFallback(thread.id, eventTurnId);
-      } else if (
-        !(event.type === "item.completed" && event.payload.itemType === "assistant_message") &&
-        event.type !== "thread.token-usage.updated"
-      ) {
-        yield* cancelPendingTurnCompletionFallback(thread.id, eventTurnId);
+        yield* clearTurnCompletionTracking(thread.id, eventTurnId);
       }
     }
 
@@ -1197,6 +1328,25 @@ const make = Effect.fn("make")(function* () {
           createdAt: now,
         });
       }
+    }
+
+    if (
+      event.type === "session.state.changed" &&
+      event.payload.state === "ready" &&
+      activeTurnId !== null
+    ) {
+      const tracking = turnCompletionTrackingByTurnKey.get(
+        providerTurnKey(thread.id, activeTurnId),
+      );
+      yield* dispatchThreadTurnCompleted({
+        event,
+        threadId: thread.id,
+        turnId: activeTurnId,
+        assistantMessageId: tracking?.assistantMessageId ?? null,
+        state: "completed",
+        completedAt: now,
+      });
+      yield* clearTurnCompletionTracking(thread.id, activeTurnId);
     }
 
     const assistantDelta =
@@ -1294,6 +1444,8 @@ const make = Effect.fn("make")(function* () {
       });
 
       if (turnId) {
+        const tracking = getOrCreateTurnCompletionTracking(thread.id, turnId);
+        tracking.assistantMessageId = assistantMessageId;
         yield* forgetAssistantMessageId(thread.id, turnId, assistantMessageId);
         if (
           thread.session?.status === "running" &&
@@ -1305,7 +1457,7 @@ const make = Effect.fn("make")(function* () {
             threadId: thread.id,
             turnId,
             assistantMessageId,
-            completedAt: now,
+            activitySequence: tracking.activitySequence,
           });
         }
       }
@@ -1361,6 +1513,7 @@ const make = Effect.fn("make")(function* () {
           turnId,
           updatedAt: now,
         });
+        yield* clearTurnCompletionTracking(thread.id, turnId);
       }
     }
 

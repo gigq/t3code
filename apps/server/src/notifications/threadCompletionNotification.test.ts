@@ -143,14 +143,69 @@ describe("thread completion notifications", () => {
   });
 
   it("falls back to a generic body when no assistant message id was captured", () => {
+    const baseSnapshot = makeSnapshot({ assistantMessageId: null });
+    const thread = baseSnapshot.threads[0]!;
+    const snapshot = {
+      ...baseSnapshot,
+      threads: [Object.assign({}, thread, { messages: [] })],
+    } satisfies OrchestrationReadModel;
     expect(
-      buildThreadCompletionNotification(
-        makeEvent({ assistantMessageId: null }),
-        makeSnapshot({ assistantMessageId: null }),
-      ),
+      buildThreadCompletionNotification(makeEvent({ assistantMessageId: null }), snapshot),
     ).toEqual(
       expect.objectContaining({
         body: "Assistant finished responding.",
+      }),
+    );
+  });
+
+  it("falls back to the latest assistant message on the completed turn when the message id is missing", () => {
+    const baseSnapshot = makeSnapshot({ assistantMessageId: null });
+    const thread = baseSnapshot.threads[0]!;
+    const snapshot = {
+      ...baseSnapshot,
+      threads: [
+        Object.assign({}, thread, {
+          messages: [
+            {
+              id: MessageId.makeUnsafe("assistant-old"),
+              role: "assistant" as const,
+              text: "Older assistant turn text.",
+              attachments: [],
+              turnId: TurnId.makeUnsafe("turn-1"),
+              streaming: false,
+              createdAt: "2026-03-30T00:00:00.000Z",
+              updatedAt: "2026-03-30T00:00:01.000Z",
+            },
+            {
+              id: MessageId.makeUnsafe("assistant-new"),
+              role: "assistant" as const,
+              text: "Final assistant text for the turn.",
+              attachments: [],
+              turnId: TurnId.makeUnsafe("turn-1"),
+              streaming: false,
+              createdAt: "2026-03-30T00:00:02.000Z",
+              updatedAt: "2026-03-30T00:00:03.000Z",
+            },
+            {
+              id: MessageId.makeUnsafe("assistant-other-turn"),
+              role: "assistant" as const,
+              text: "Wrong turn text.",
+              attachments: [],
+              turnId: TurnId.makeUnsafe("turn-2"),
+              streaming: false,
+              createdAt: "2026-03-30T00:00:04.000Z",
+              updatedAt: "2026-03-30T00:00:05.000Z",
+            },
+          ],
+        }),
+      ],
+    } satisfies OrchestrationReadModel;
+
+    expect(
+      buildThreadCompletionNotification(makeEvent({ assistantMessageId: null }), snapshot),
+    ).toEqual(
+      expect.objectContaining({
+        body: "Final assistant text for the turn.",
       }),
     );
   });
