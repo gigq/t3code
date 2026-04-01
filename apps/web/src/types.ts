@@ -112,6 +112,25 @@ export interface Thread {
   activities: OrchestrationThreadActivity[];
 }
 
+export interface SidebarThreadSummary {
+  id: ThreadId;
+  projectId: ProjectId;
+  title: string;
+  interactionMode: ProviderInteractionMode;
+  autoDeferUntil?: string | null;
+  session: ThreadSession | null;
+  createdAt: string;
+  archivedAt: string | null;
+  updatedAt?: string | undefined;
+  latestTurn: OrchestrationLatestTurn | null;
+  branch: string | null;
+  worktreePath: string | null;
+  latestUserMessageAt: string | null;
+  hasPendingApprovals: boolean;
+  hasPendingUserInput: boolean;
+  hasActionableProposedPlan: boolean;
+}
+
 export interface ThreadSession {
   provider: ProviderKind;
   status: SessionPhase | "error" | "closed";

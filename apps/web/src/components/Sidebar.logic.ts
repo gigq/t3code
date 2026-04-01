@@ -1,13 +1,9 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import { isAutoModeDeferred } from "@t3tools/shared/autoMode";
-import type { Thread } from "../types";
+import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
-import {
-  findLatestProposedPlan,
-  hasActionableProposedPlan,
-  isLatestTurnSettled,
-} from "../session-logic";
+import { isLatestTurnSettled } from "../session-logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -55,7 +51,15 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Completed: 1,
 };
 
-type ThreadStatusInput = Pick<Thread, "interactionMode" | "latestTurn" | "proposedPlans" | "session"> & {
+type ThreadStatusInput = Pick<
+  SidebarThreadSummary,
+  | "hasActionableProposedPlan"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+  | "interactionMode"
+  | "latestTurn"
+  | "session"
+> & {
   autoDeferUntil?: Thread["autoDeferUntil"];
   lastVisitedAt?: string | undefined;
 };
@@ -239,15 +243,11 @@ export function orderItemsByPreferredIds<TItem, TId>(input: {
 export function getVisibleSidebarThreadIds<TThreadId>(
   renderedProjects: readonly {
     shouldShowThreadPanel?: boolean;
-    renderedThreads: readonly {
-      id: TThreadId;
-    }[];
+    renderedThreadIds: readonly TThreadId[];
   }[],
 ): TThreadId[] {
   return renderedProjects.flatMap((renderedProject) =>
-    renderedProject.shouldShowThreadPanel === false
-      ? []
-      : renderedProject.renderedThreads.map((thread) => thread.id),
+    renderedProject.shouldShowThreadPanel === false ? [] : renderedProject.renderedThreadIds,
   );
 }
 
@@ -320,12 +320,10 @@ export function resolveThreadRowClassName(input: {
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
-  hasPendingApprovals: boolean;
-  hasPendingUserInput: boolean;
 }): ThreadStatusPill | null {
-  const { hasPendingApprovals, hasPendingUserInput, thread } = input;
+  const { thread } = input;
 
-  if (hasPendingApprovals) {
+  if (thread.hasPendingApprovals) {
     return {
       label: "Pending Approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
@@ -334,7 +332,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (hasPendingUserInput) {
+  if (thread.hasPendingUserInput) {
     return {
       label: "Awaiting Input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
@@ -371,12 +369,10 @@ export function resolveThreadStatusPill(input: {
   }
 
   const hasPlanReadyPrompt =
-    !hasPendingUserInput &&
+    !thread.hasPendingUserInput &&
     thread.interactionMode === "plan" &&
     isLatestTurnSettled(thread.latestTurn, thread.session) &&
-    hasActionableProposedPlan(
-      findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId ?? null),
-    );
+    thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {
     return {
       label: "Plan Ready",
