@@ -941,65 +941,66 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const processDomainEvent = (event: ProviderIntentEvent) =>
-    Effect.gen(function* () {
-      switch (event.type) {
-        case "thread.interaction-mode-set": {
-          const thread = yield* resolveThread(event.payload.threadId);
-          if (event.payload.interactionMode === "auto") {
-            yield* syncAutoWakeForThread(thread, AUTO_MODE_INITIAL_WAKE_DELAY_MS, event.type);
-          } else {
-            yield* clearAutoWake(event.payload.threadId, event.type);
-          }
-          return;
-        }
-        case "thread.auto-defer-set": {
-          const thread = yield* resolveThread(event.payload.threadId);
+  const processDomainEvent = Effect.fn("processDomainEvent")(function* (
+    event: ProviderIntentEvent,
+  ) {
+    switch (event.type) {
+      case "thread.interaction-mode-set": {
+        const thread = yield* resolveThread(event.payload.threadId);
+        if (event.payload.interactionMode === "auto") {
           yield* syncAutoWakeForThread(thread, AUTO_MODE_INITIAL_WAKE_DELAY_MS, event.type);
-          return;
-        }
-        case "thread.runtime-mode-set": {
-          const thread = yield* resolveThread(event.payload.threadId);
-          if (!thread?.session || thread.session.status === "stopped") {
-            return;
-          }
-          const cachedModelSelection = threadModelSelections.get(event.payload.threadId);
-          yield* ensureSessionForThread(
-            event.payload.threadId,
-            event.occurredAt,
-            cachedModelSelection !== undefined ? { modelSelection: cachedModelSelection } : {},
-          );
-          return;
-        }
-        case "thread.session-set": {
-          const thread = yield* resolveThread(event.payload.threadId);
-          yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
-          return;
-        }
-        case "thread.turn-completed": {
-          const thread = yield* resolveThread(event.payload.threadId);
-          yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
-          return;
-        }
-        case "thread.turn-start-requested":
+        } else {
           yield* clearAutoWake(event.payload.threadId, event.type);
-          yield* processTurnStartRequested(event);
-          return;
-        case "thread.turn-interrupt-requested":
-          yield* processTurnInterruptRequested(event);
-          return;
-        case "thread.approval-response-requested":
-          yield* processApprovalResponseRequested(event);
-          return;
-        case "thread.user-input-response-requested":
-          yield* processUserInputResponseRequested(event);
-          return;
-        case "thread.session-stop-requested":
-          yield* clearAutoWake(event.payload.threadId, event.type);
-          yield* processSessionStopRequested(event);
-          return;
+        }
+        return;
       }
-    });
+      case "thread.auto-defer-set": {
+        const thread = yield* resolveThread(event.payload.threadId);
+        yield* syncAutoWakeForThread(thread, AUTO_MODE_INITIAL_WAKE_DELAY_MS, event.type);
+        return;
+      }
+      case "thread.runtime-mode-set": {
+        const thread = yield* resolveThread(event.payload.threadId);
+        if (!thread?.session || thread.session.status === "stopped") {
+          return;
+        }
+        const cachedModelSelection = threadModelSelections.get(event.payload.threadId);
+        yield* ensureSessionForThread(
+          event.payload.threadId,
+          event.occurredAt,
+          cachedModelSelection !== undefined ? { modelSelection: cachedModelSelection } : {},
+        );
+        return;
+      }
+      case "thread.session-set": {
+        const thread = yield* resolveThread(event.payload.threadId);
+        yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
+        return;
+      }
+      case "thread.turn-completed": {
+        const thread = yield* resolveThread(event.payload.threadId);
+        yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
+        return;
+      }
+      case "thread.turn-start-requested":
+        yield* clearAutoWake(event.payload.threadId, event.type);
+        yield* processTurnStartRequested(event);
+        return;
+      case "thread.turn-interrupt-requested":
+        yield* processTurnInterruptRequested(event);
+        return;
+      case "thread.approval-response-requested":
+        yield* processApprovalResponseRequested(event);
+        return;
+      case "thread.user-input-response-requested":
+        yield* processUserInputResponseRequested(event);
+        return;
+      case "thread.session-stop-requested":
+        yield* clearAutoWake(event.payload.threadId, event.type);
+        yield* processSessionStopRequested(event);
+        return;
+    }
+  });
 
   const processDomainEventSafely = (event: ProviderIntentEvent) =>
     processDomainEvent(event).pipe(
