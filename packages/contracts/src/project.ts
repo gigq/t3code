@@ -26,6 +26,31 @@ export const ProjectSearchEntriesResult = Schema.Struct({
 });
 export type ProjectSearchEntriesResult = typeof ProjectSearchEntriesResult.Type;
 
+export const ProjectBrowseDirectoriesInput = Schema.Struct({
+  path: Schema.optional(TrimmedNonEmptyString),
+});
+export type ProjectBrowseDirectoriesInput = typeof ProjectBrowseDirectoriesInput.Type;
+
+export const ProjectBrowseDirectoryRoot = Schema.Struct({
+  label: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+});
+export type ProjectBrowseDirectoryRoot = typeof ProjectBrowseDirectoryRoot.Type;
+
+export const ProjectBrowseDirectoryEntry = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+});
+export type ProjectBrowseDirectoryEntry = typeof ProjectBrowseDirectoryEntry.Type;
+
+export const ProjectBrowseDirectoriesResult = Schema.Struct({
+  currentPath: TrimmedNonEmptyString,
+  parentPath: Schema.optional(TrimmedNonEmptyString),
+  roots: Schema.Array(ProjectBrowseDirectoryRoot),
+  entries: Schema.Array(ProjectBrowseDirectoryEntry),
+});
+export type ProjectBrowseDirectoriesResult = typeof ProjectBrowseDirectoriesResult.Type;
+
 export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),

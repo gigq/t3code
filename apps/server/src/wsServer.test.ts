@@ -1771,6 +1771,36 @@ describe("WebSocket Server", () => {
     });
   });
 
+  it("supports projects.browseDirectories", async () => {
+    const workspace = makeTempDir("t3code-ws-browse-directories-");
+    fs.mkdirSync(path.join(workspace, "alpha"), { recursive: true });
+    fs.mkdirSync(path.join(workspace, ".hidden"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "README.md"), "# test", "utf8");
+
+    server = await createTestServer({ cwd: workspace });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsBrowseDirectories, {});
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      currentPath: workspace,
+      parentPath: path.dirname(workspace),
+      roots: expect.arrayContaining([
+        { label: "Current", path: workspace },
+        { label: "Home", path: expect.any(String) },
+        { label: "Root", path: path.parse(workspace).root || "/" },
+      ]),
+      entries: [
+        { name: "alpha", path: path.join(workspace, "alpha") },
+        { name: ".hidden", path: path.join(workspace, ".hidden") },
+      ],
+    });
+  });
+
   it("supports projects.writeFile within the workspace root", async () => {
     const workspace = makeTempDir("t3code-ws-write-file-");
 

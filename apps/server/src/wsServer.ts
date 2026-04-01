@@ -8,6 +8,7 @@
  */
 import http from "node:http";
 import https from "node:https";
+import { promises as fs } from "node:fs";
 import type { Duplex } from "node:stream";
 
 import Mime from "@effect/platform-node/Mime";
@@ -931,6 +932,77 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     Effect.all([closeAllClients, closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))]),
   );
 
+  const browseProjectDirectories = Effect.fnUntraced(function* (input: {
+    readonly path?: string | undefined;
+  }) {
+    const requestedPath =
+      input.path !== undefined && input.path.trim().length > 0 ? input.path.trim() : cwd;
+    const currentPath = path.resolve(yield* expandHomePath(requestedPath));
+    const currentStat = yield* fileSystem
+      .stat(currentPath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!currentStat) {
+      return yield* new RouteRequestError({
+        message: `Directory does not exist: ${currentPath}`,
+      });
+    }
+    if (currentStat.type !== "Directory") {
+      return yield* new RouteRequestError({
+        message: `Path is not a directory: ${currentPath}`,
+      });
+    }
+
+    const directoryEntries = yield* Effect.tryPromise({
+      try: () => fs.readdir(currentPath, { withFileTypes: true }),
+      catch: (cause) =>
+        new RouteRequestError({
+          message: `Failed to read directory: ${String(cause)}`,
+        }),
+    });
+
+    const entries = directoryEntries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        path: path.join(currentPath, entry.name),
+      }))
+      .toSorted((left, right) => {
+        const leftHidden = left.name.startsWith(".");
+        const rightHidden = right.name.startsWith(".");
+        if (leftHidden !== rightHidden) {
+          return leftHidden ? 1 : -1;
+        }
+        return left.name.localeCompare(right.name, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
+
+    const homePath = path.resolve(yield* expandHomePath("~"));
+    const currentRoot = path.parse(currentPath).root || "/";
+    const roots = Array.from(
+      new Map(
+        [
+          ["Current", path.resolve(cwd)],
+          ["Home", homePath],
+          ["Root", currentRoot],
+        ].map(([label, absolutePath]) => [absolutePath, { label, path: absolutePath }] as const),
+      ).values(),
+    );
+
+    const parentPath = (() => {
+      const nextParentPath = path.dirname(currentPath);
+      return nextParentPath === currentPath ? undefined : nextParentPath;
+    })();
+
+    return {
+      currentPath,
+      ...(parentPath ? { parentPath } : {}),
+      roots,
+      entries,
+    };
+  });
+
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
     switch (request.body._tag) {
       case ORCHESTRATION_WS_METHODS.getSnapshot:
@@ -967,6 +1039,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             }),
           ),
         ).pipe(Effect.map((events) => Array.from(events)));
+      }
+
+      case WS_METHODS.projectsBrowseDirectories: {
+        const body = stripRequestTag(request.body);
+        return yield* browseProjectDirectories(body);
       }
 
       case WS_METHODS.projectsSearchEntries: {

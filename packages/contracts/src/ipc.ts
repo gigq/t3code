@@ -20,6 +20,8 @@ import type {
   GitStatusResult,
 } from "./git";
 import type {
+  ProjectBrowseDirectoriesInput,
+  ProjectBrowseDirectoriesResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -146,6 +148,9 @@ export interface NativeApi {
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
   };
   projects: {
+    browseDirectories: (
+      input: ProjectBrowseDirectoriesInput,
+    ) => Promise<ProjectBrowseDirectoriesResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
