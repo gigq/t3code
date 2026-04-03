@@ -60,7 +60,6 @@ import {
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   hasToolActivityForTurn,
-  isSessionActivelyRunningTurn,
   isLatestTurnSettled,
   formatElapsed,
 } from "../session-logic";
@@ -1229,11 +1228,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const isTurnRunning = isSessionActivelyRunningTurn(
-    activeLatestTurn,
-    activeThread?.session ?? null,
-  );
-  const isWorking = isTurnRunning || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -1250,7 +1245,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (activePendingProgress) {
       return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;
     }
-    if (isTurnRunning) {
+    if (phase === "running") {
       return "running";
     }
     if (showPlanFollowUpPrompt) {
@@ -1264,7 +1259,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isConnecting,
     isPreparingWorktree,
     isSendBusy,
-    isTurnRunning,
+    phase,
     prompt,
     showPlanFollowUpPrompt,
   ]);
@@ -2475,10 +2470,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     scheduleStickToBottom();
   }, [messageCount, scheduleStickToBottom]);
   useEffect(() => {
-    if (!isTurnRunning) return;
+    if (phase !== "running") return;
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
-  }, [isTurnRunning, scheduleStickToBottom, timelineEntries]);
+  }, [phase, scheduleStickToBottom, timelineEntries]);
 
   useEffect(() => {
     setExpandedWorkGroups({});
@@ -2697,14 +2692,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       : "local";
 
   useEffect(() => {
-    if (!isTurnRunning) return;
+    if (phase !== "running") return;
     const timer = window.setInterval(() => {
       setNowTick(Date.now());
     }, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [isTurnRunning]);
+  }, [phase]);
 
   const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
     setSendStartedAt((current) => current ?? new Date().toISOString());
@@ -2966,7 +2961,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const api = readNativeApi();
       if (!api || !activeThread || isRevertingCheckpoint) return;
 
-      if (isTurnRunning || isSendBusy || isConnecting) {
+      if (phase === "running" || isSendBusy || isConnecting) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
@@ -2999,7 +2994,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       setIsRevertingCheckpoint(false);
     },
-    [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, isTurnRunning, setThreadError],
+    [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
   );
 
   const onSend = async (e?: { preventDefault: () => void }) => {
@@ -4601,7 +4596,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 }
                               : null
                           }
-                          isRunning={isTurnRunning}
+                          isRunning={phase === "running"}
                           interruptAriaLabel={
                             activeThread?.interactionMode === "auto"
                               ? "Stop auto mode"
