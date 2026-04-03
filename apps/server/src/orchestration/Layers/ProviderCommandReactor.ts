@@ -26,6 +26,7 @@ import {
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
+import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError, ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -244,7 +245,7 @@ const make = Effect.gen(function* () {
       createdAt: input.createdAt,
     });
 
-  const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+  const resolveThread = Effect.fn("resolveThread")(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
     return readModel.threads.find((entry) => entry.id === threadId);
   });
@@ -322,7 +323,7 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const ensureSessionForThread = Effect.fnUntraced(function* (
+  const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
     options?: {
@@ -459,7 +460,7 @@ const make = Effect.gen(function* () {
     return startedSession.threadId;
   });
 
-  const sendTurnForThread = Effect.fnUntraced(function* (input: {
+  const sendTurnForThread = Effect.fn("sendTurnForThread")(function* (input: {
     readonly threadId: ThreadId;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
@@ -613,7 +614,9 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fnUntraced(function* (input: {
+  const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fn(
+    "maybeGenerateAndRenameWorktreeBranchForFirstTurn",
+  )(function* (input: {
     readonly threadId: ThreadId;
     readonly branch: string | null;
     readonly worktreePath: string | null;
@@ -665,50 +668,52 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const maybeGenerateThreadTitleForFirstTurn = Effect.fnUntraced(function* (input: {
-    readonly threadId: ThreadId;
-    readonly cwd: string;
-    readonly messageText: string;
-    readonly attachments?: ReadonlyArray<ChatAttachment>;
-    readonly titleSeed?: string;
-  }) {
-    const attachments = input.attachments ?? [];
-    yield* Effect.gen(function* () {
-      const { textGenerationModelSelection: modelSelection } =
-        yield* serverSettingsService.getSettings;
+  const maybeGenerateThreadTitleForFirstTurn = Effect.fn("maybeGenerateThreadTitleForFirstTurn")(
+    function* (input: {
+      readonly threadId: ThreadId;
+      readonly cwd: string;
+      readonly messageText: string;
+      readonly attachments?: ReadonlyArray<ChatAttachment>;
+      readonly titleSeed?: string;
+    }) {
+      const attachments = input.attachments ?? [];
+      yield* Effect.gen(function* () {
+        const { textGenerationModelSelection: modelSelection } =
+          yield* serverSettingsService.getSettings;
 
-      const generated = yield* textGeneration.generateThreadTitle({
-        cwd: input.cwd,
-        message: input.messageText,
-        ...(attachments.length > 0 ? { attachments } : {}),
-        modelSelection,
-      });
-      if (!generated) return;
-
-      const thread = yield* resolveThread(input.threadId);
-      if (!thread) return;
-      if (!canReplaceThreadTitle(thread.title, input.titleSeed)) {
-        return;
-      }
-
-      yield* orchestrationEngine.dispatch({
-        type: "thread.meta.update",
-        commandId: serverCommandId("thread-title-rename"),
-        threadId: input.threadId,
-        title: generated.title,
-      });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("provider command reactor failed to generate or rename thread title", {
-          threadId: input.threadId,
+        const generated = yield* textGeneration.generateThreadTitle({
           cwd: input.cwd,
-          cause: Cause.pretty(cause),
-        }),
-      ),
-    );
-  });
+          message: input.messageText,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          modelSelection,
+        });
+        if (!generated) return;
 
-  const processTurnStartRequested = Effect.fnUntraced(function* (
+        const thread = yield* resolveThread(input.threadId);
+        if (!thread) return;
+        if (!canReplaceThreadTitle(thread.title, input.titleSeed)) {
+          return;
+        }
+
+        yield* orchestrationEngine.dispatch({
+          type: "thread.meta.update",
+          commandId: serverCommandId("thread-title-rename"),
+          threadId: input.threadId,
+          title: generated.title,
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider command reactor failed to generate or rename thread title", {
+            threadId: input.threadId,
+            cwd: input.cwd,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+    },
+  );
+
+  const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
     const key = turnStartKeyForEvent(event);
@@ -787,7 +792,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const processTurnInterruptRequested = Effect.fnUntraced(function* (
+  const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
@@ -810,7 +815,7 @@ const make = Effect.gen(function* () {
     yield* providerService.interruptTurn({ threadId: event.payload.threadId });
   });
 
-  const processApprovalResponseRequested = Effect.fnUntraced(function* (
+  const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
@@ -857,50 +862,52 @@ const make = Effect.gen(function* () {
       );
   });
 
-  const processUserInputResponseRequested = Effect.fnUntraced(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.user-input-response-requested" }>,
-  ) {
-    const thread = yield* resolveThread(event.payload.threadId);
-    if (!thread) {
-      return;
-    }
-    const hasSession = thread.session && thread.session.status !== "stopped";
-    if (!hasSession) {
-      return yield* appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: "provider.user-input.respond.failed",
-        summary: "Provider user input response failed",
-        detail: "No active provider session is bound to this thread.",
-        turnId: null,
-        createdAt: event.payload.createdAt,
-        requestId: event.payload.requestId,
-      });
-    }
+  const processUserInputResponseRequested = Effect.fn("processUserInputResponseRequested")(
+    function* (
+      event: Extract<ProviderIntentEvent, { type: "thread.user-input-response-requested" }>,
+    ) {
+      const thread = yield* resolveThread(event.payload.threadId);
+      if (!thread) {
+        return;
+      }
+      const hasSession = thread.session && thread.session.status !== "stopped";
+      if (!hasSession) {
+        return yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.user-input.respond.failed",
+          summary: "Provider user input response failed",
+          detail: "No active provider session is bound to this thread.",
+          turnId: null,
+          createdAt: event.payload.createdAt,
+          requestId: event.payload.requestId,
+        });
+      }
 
-    yield* providerService
-      .respondToUserInput({
-        threadId: event.payload.threadId,
-        requestId: event.payload.requestId,
-        answers: event.payload.answers,
-      })
-      .pipe(
-        Effect.catchCause((cause) =>
-          appendProviderFailureActivity({
-            threadId: event.payload.threadId,
-            kind: "provider.user-input.respond.failed",
-            summary: "Provider user input response failed",
-            detail: isUnknownPendingUserInputRequestError(cause)
-              ? stalePendingRequestDetail("user-input", event.payload.requestId)
-              : Cause.pretty(cause),
-            turnId: null,
-            createdAt: event.payload.createdAt,
-            requestId: event.payload.requestId,
-          }),
-        ),
-      );
-  });
+      yield* providerService
+        .respondToUserInput({
+          threadId: event.payload.threadId,
+          requestId: event.payload.requestId,
+          answers: event.payload.answers,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.user-input.respond.failed",
+              summary: "Provider user input response failed",
+              detail: isUnknownPendingUserInputRequestError(cause)
+                ? stalePendingRequestDetail("user-input", event.payload.requestId)
+                : Cause.pretty(cause),
+              turnId: null,
+              createdAt: event.payload.createdAt,
+              requestId: event.payload.requestId,
+            }),
+          ),
+        );
+    },
+  );
 
-  const processSessionStopRequested = Effect.fnUntraced(function* (
+  const processSessionStopRequested = Effect.fn("processSessionStopRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
@@ -944,6 +951,14 @@ const make = Effect.gen(function* () {
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
+    yield* Effect.annotateCurrentSpan({
+      "orchestration.event_type": event.type,
+      "orchestration.thread_id": event.payload.threadId,
+      ...(event.commandId ? { "orchestration.command_id": event.commandId } : {}),
+    });
+    yield* increment(orchestrationEventsProcessedTotal, {
+      eventType: event.type,
+    });
     switch (event.type) {
       case "thread.interaction-mode-set": {
         const thread = yield* resolveThread(event.payload.threadId);

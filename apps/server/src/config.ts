@@ -32,6 +32,7 @@ export interface ServerDerivedPaths {
   readonly attachmentsDir: string;
   readonly logsDir: string;
   readonly serverLogPath: string;
+  readonly serverTracePath: string;
   readonly providerLogsDir: string;
   readonly providerEventLogPath: string;
   readonly terminalLogsDir: string;
@@ -43,6 +44,15 @@ export interface ServerDerivedPaths {
  */
 export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logLevel: LogLevel.LogLevel;
+  readonly traceMinLevel: LogLevel.LogLevel;
+  readonly traceTimingEnabled: boolean;
+  readonly traceBatchWindowMs: number;
+  readonly traceMaxBytes: number;
+  readonly traceMaxFiles: number;
+  readonly otlpTracesUrl: string | undefined;
+  readonly otlpMetricsUrl: string | undefined;
+  readonly otlpExportIntervalMs: number;
+  readonly otlpServiceName: string;
   readonly mode: RuntimeMode;
   readonly port: number;
   readonly host: string | undefined;
@@ -78,6 +88,7 @@ export const deriveServerPaths = Effect.fn(function* (
     attachmentsDir,
     logsDir,
     serverLogPath: join(logsDir, "server.log"),
+    serverTracePath: join(logsDir, "server.trace.ndjson"),
     providerLogsDir,
     providerEventLogPath: join(providerLogsDir, "events.log"),
     terminalLogsDir: join(logsDir, "terminals"),
@@ -127,6 +138,15 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
 
         return {
           logLevel: "Error",
+          traceMinLevel: "Info",
+          traceTimingEnabled: true,
+          traceBatchWindowMs: 200,
+          traceMaxBytes: 10 * 1024 * 1024,
+          traceMaxFiles: 10,
+          otlpTracesUrl: undefined,
+          otlpMetricsUrl: undefined,
+          otlpExportIntervalMs: 10_000,
+          otlpServiceName: "t3-server",
           cwd,
           baseDir,
           ...derivedPaths,
