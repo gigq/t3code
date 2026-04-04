@@ -55,6 +55,10 @@
     "./autoMode": {
       "types": "./src/autoMode.ts",
       "import": "./src/autoMode.ts"
+    },
+    "./projectScripts": {
+      "types": "./src/projectScripts.ts",
+      "import": "./src/projectScripts.ts"
     }
   },
   "scripts": {
