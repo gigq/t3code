@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { AUTO_MODE_NOOP_SENTINEL, parseAutoModeControlMessage } from "@t3tools/shared/autoMode";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -738,14 +739,20 @@ const make = Effect.fn("make")(function* () {
     commandTag: string;
     finalDeltaCommandTag: string;
     fallbackText?: string;
+    autoModeEnabled?: boolean;
   }) {
     const bufferedText = yield* takeBufferedAssistantText(input.messageId);
-    const text =
+    const rawText =
       bufferedText.length > 0
         ? bufferedText
         : (input.fallbackText?.trim().length ?? 0) > 0
           ? input.fallbackText!
           : "";
+    const autoModeControl =
+      input.autoModeEnabled === true
+        ? parseAutoModeControlMessage(rawText, new Date(input.createdAt))
+        : null;
+    const text = autoModeControl?.kind === "defer" ? AUTO_MODE_NOOP_SENTINEL : rawText;
 
     if (text.length > 0) {
       yield* orchestrationEngine.dispatch({
@@ -755,6 +762,16 @@ const make = Effect.fn("make")(function* () {
         messageId: input.messageId,
         delta: text,
         ...(input.turnId ? { turnId: input.turnId } : {}),
+        createdAt: input.createdAt,
+      });
+    }
+
+    if (autoModeControl?.kind === "defer") {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.auto-defer.set",
+        commandId: providerCommandId(input.event, "auto-defer-set"),
+        threadId: input.threadId,
+        autoDeferUntil: autoModeControl.deferUntil,
         createdAt: input.createdAt,
       });
     }
@@ -1425,6 +1442,7 @@ const make = Effect.fn("make")(function* () {
         ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
           ? { fallbackText: assistantCompletion.fallbackText }
           : {}),
+        autoModeEnabled: thread.interactionMode === "auto",
       });
 
       if (turnId) {
@@ -1502,6 +1520,7 @@ const make = Effect.fn("make")(function* () {
               createdAt: now,
               commandTag: "assistant-complete-finalize",
               finalDeltaCommandTag: "assistant-delta-finalize-fallback",
+              autoModeEnabled: thread.interactionMode === "auto",
             }),
           { concurrency: 1 },
         ).pipe(Effect.asVoid);

@@ -683,6 +683,70 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.latestTurn?.state).toBe("completed");
   });
 
+  it("applies model-issued auto defer controls in auto mode", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-mode"),
+        threadId: asThreadId("thread-1"),
+        interactionMode: "auto",
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-auto-defer"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-auto-defer"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-auto-defer",
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-auto-defer-assistant-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-defer"),
+      itemId: asItemId("item-turn-auto-defer-assistant"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: '<t3code:auto-defer preset="15m" />',
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.autoDeferUntil !== null &&
+        entry.activities.some((activity) => activity.kind === "auto.defer.set"),
+    );
+
+    expect(thread.autoDeferUntil).not.toBeNull();
+    const deferredUntilMs = Date.parse(thread.autoDeferUntil ?? "");
+    const createdAtMs = Date.parse(now);
+    expect(Number.isNaN(deferredUntilMs)).toBe(false);
+    expect(deferredUntilMs - createdAtMs).toBeGreaterThanOrEqual(14 * 60_000);
+    expect(deferredUntilMs - createdAtMs).toBeLessThanOrEqual(16 * 60_000);
+    expect(thread.messages.at(-1)?.text).toBe("<t3code:auto-noop />");
+    expect(thread.activities.at(-1)).toMatchObject({
+      kind: "auto.defer.set",
+      summary: "Auto waiting",
+    });
+  });
+
   it("does not complete a turn early when session ready arrives before later turn activity", async () => {
     process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "200";
     const harness = await createHarness();

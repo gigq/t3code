@@ -24,7 +24,7 @@ import {
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   isAutoModeDeferred,
-  isAutoModeNoopMessage,
+  isAutoModeHiddenControlMessage,
   resolveAutoModeDeferUntil,
   type AutoModeDeferPreset,
 } from "@t3tools/shared/autoMode";
@@ -983,7 +983,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             return changed ? { ...message, attachments } : message;
           });
     const visibleServerMessages = serverMessagesWithPreviewHandoff.filter(
-      (message) => message.role !== "assistant" || !isAutoModeNoopMessage(message.text),
+      (message) => message.role !== "assistant" || !isAutoModeHiddenControlMessage(message.text),
     );
 
     if (optimisticUserMessages.length === 0) {
