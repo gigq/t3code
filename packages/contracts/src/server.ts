@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
@@ -95,3 +95,29 @@ export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });
 export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+
+export const ServerCodexUsageWindow = Schema.Struct({
+  windowMinutes: Schema.NullOr(NonNegativeInt),
+  usedPercent: Schema.NullOr(Schema.Number),
+  leftPercent: Schema.NullOr(Schema.Number),
+  resetsAt: Schema.NullOr(IsoDateTime),
+  resetDescription: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerCodexUsageWindow = typeof ServerCodexUsageWindow.Type;
+
+export const ServerCodexUsage = Schema.Struct({
+  available: Schema.Boolean,
+  provider: TrimmedNonEmptyString,
+  accountEmail: Schema.NullOr(TrimmedNonEmptyString),
+  loginMethod: Schema.NullOr(TrimmedNonEmptyString),
+  source: Schema.NullOr(TrimmedNonEmptyString),
+  version: Schema.NullOr(TrimmedNonEmptyString),
+  primary: Schema.NullOr(ServerCodexUsageWindow),
+  secondary: Schema.NullOr(ServerCodexUsageWindow),
+  sparkPrimary: Schema.NullOr(ServerCodexUsageWindow),
+  sparkSecondary: Schema.NullOr(ServerCodexUsageWindow),
+  creditsRemaining: Schema.NullOr(Schema.Number),
+  updatedAt: Schema.NullOr(IsoDateTime),
+  error: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerCodexUsage = typeof ServerCodexUsage.Type;

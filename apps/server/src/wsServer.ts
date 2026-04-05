@@ -78,6 +78,7 @@ import {
 } from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
+import { getCodexUsage } from "./codexUsage";
 import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
@@ -1208,6 +1209,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           availableEditors,
           settings,
         };
+      }
+
+      case WS_METHODS.serverGetCodexUsage: {
+        return yield* Effect.tryPromise({
+          try: () => getCodexUsage(),
+          catch: (cause) =>
+            new RouteRequestError({
+              message:
+                cause instanceof Error ? cause.message : "Failed to load Codex usage snapshot.",
+            }),
+        });
       }
 
       case WS_METHODS.serverRefreshProviders: {

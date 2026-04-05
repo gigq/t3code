@@ -74,6 +74,7 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
+import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { ImportCodexThreadDialog } from "./ImportCodexThreadDialog";
 import { AddProjectDialog } from "./AddProjectDialog";
@@ -104,6 +105,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
@@ -123,6 +125,7 @@ import {
   useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { SidebarCodexUsageControl } from "./sidebar/SidebarCodexUsageControl";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useImportCodexThread } from "~/hooks/useImportCodexThread";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
@@ -346,6 +349,7 @@ export default function Sidebar() {
   const { handleNewThread } = useHandleNewThread();
   const { importCodexThread } = useImportCodexThread();
   const { confirmAndDeleteThread, deleteThread } = useThreadActions();
+  const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
@@ -427,6 +431,14 @@ export default function Sidebar() {
     importDialogProjectId !== null
       ? (projects.find((project) => project.id === importDialogProjectId) ?? null)
       : null;
+  const activeThread = useMemo(
+    () => (routeThreadId ? (threads.find((thread) => thread.id === routeThreadId) ?? null) : null),
+    [routeThreadId, threads],
+  );
+  const activeContextWindow = useMemo(
+    () => deriveLatestContextWindowSnapshot(activeThread?.activities ?? []),
+    [activeThread?.activities],
+  );
   const gitStatusByThreadId = useMemo(() => {
     const statusByCwd = new Map<string, GitStatusResult>();
     for (let index = 0; index < threadGitStatusCwds.length; index += 1) {
@@ -774,6 +786,9 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void navigate({
         to: "/$threadId",
         params: { threadId },
@@ -781,10 +796,12 @@ export default function Sidebar() {
     },
     [
       clearSelection,
+      isMobile,
       navigate,
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
+      setOpenMobile,
       toggleThreadSelection,
     ],
   );
@@ -795,12 +812,15 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void navigate({
         to: "/$threadId",
         params: { threadId },
       });
     },
-    [clearSelection, navigate, selectedThreadIds.size, setSelectionAnchor],
+    [clearSelection, isMobile, navigate, selectedThreadIds.size, setOpenMobile, setSelectionAnchor],
   );
 
   const handleProjectContextMenu = useCallback(
@@ -1665,26 +1685,33 @@ export default function Sidebar() {
   }, []);
 
   const wordmark = (
-    <div className="flex items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <div className="flex min-w-0 flex-1 items-center gap-1 ml-1 cursor-pointer">
-              <T3Wordmark />
-              <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
-                Code
-              </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {APP_STAGE_LABEL}
-              </span>
-            </div>
-          }
-        />
-        <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
-        </TooltipPopup>
-      </Tooltip>
+    <div className="flex w-full items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <SidebarTrigger className="shrink-0 md:hidden" />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <div className="flex min-w-0 flex-1 items-center gap-1 ml-1 cursor-pointer">
+                <T3Wordmark />
+                <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
+                  Code
+                </span>
+                <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                  {APP_STAGE_LABEL}
+                </span>
+              </div>
+            }
+          />
+          <TooltipPopup side="bottom" sideOffset={2}>
+            Version {APP_VERSION}
+          </TooltipPopup>
+        </Tooltip>
+      </div>
+      <SidebarCodexUsageControl
+        isMobile={isMobile}
+        currentThreadTitle={activeThread?.title ?? null}
+        currentContextWindow={activeContextWindow}
+      />
     </div>
   );
 

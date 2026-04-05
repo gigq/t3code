@@ -43,7 +43,11 @@ import {
 } from "./project";
 import { OpenInEditorInput } from "./editor";
 import { RemoveWebPushSubscriptionInput, WebPushSubscription } from "./notifications";
-import { ServerConfigUpdatedPayload, ServerProviderUpdatedPayload } from "./server";
+import {
+  ServerCodexUsage,
+  ServerConfigUpdatedPayload,
+  ServerProviderUpdatedPayload,
+} from "./server";
 import { ServerSettingsPatch } from "./settings";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
@@ -88,6 +92,7 @@ export const WS_METHODS = {
 
   // Server meta
   serverGetConfig: "server.getConfig",
+  serverGetCodexUsage: "server.getCodexUsage",
   serverRefreshProviders: "server.refreshProviders",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
@@ -164,6 +169,7 @@ const WebSocketRequestBody = Schema.Union([
 
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.serverGetCodexUsage, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverRefreshProviders, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),
   tagRequestBody(WS_METHODS.serverGetSettings, Schema.Struct({})),
@@ -258,6 +264,9 @@ export const WsPush = Schema.Union([
   WsPushTerminalEvent,
   WsPushOrchestrationDomainEvent,
 ]);
+
+export const ServerGetCodexUsageResult = ServerCodexUsage;
+export type ServerGetCodexUsageResult = typeof ServerGetCodexUsageResult.Type;
 export type WsPush = typeof WsPush.Type;
 
 export type WsPushMessage<C extends WsPushChannel> = Extract<WsPush, { channel: C }>;

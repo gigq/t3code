@@ -4,6 +4,7 @@ import { ensureNativeApi } from "~/nativeApi";
 export const serverQueryKeys = {
   all: ["server"] as const,
   config: () => ["server", "config"] as const,
+  codexUsage: () => ["server", "codex-usage"] as const,
 };
 
 /**
@@ -19,6 +20,17 @@ export function serverConfigQueryOptions() {
     queryFn: async () => {
       const api = ensureNativeApi();
       return api.server.getConfig();
+    },
+  });
+}
+
+export function serverCodexUsageQueryOptions() {
+  return queryOptions({
+    queryKey: serverQueryKeys.codexUsage(),
+    staleTime: 60_000,
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.server.getCodexUsage();
     },
   });
 }
