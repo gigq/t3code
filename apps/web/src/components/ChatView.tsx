@@ -2902,12 +2902,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onInterrupt = async () => {
     const api = readNativeApi();
     if (!api || !activeThread) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.turn.interrupt",
-      commandId: newCommandId(),
-      threadId: activeThread.id,
-      createdAt: new Date().toISOString(),
-    });
+    await api.orchestration.dispatchCommand(
+      activeThread.interactionMode === "auto"
+        ? {
+            type: "thread.session.stop",
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            createdAt: new Date().toISOString(),
+          }
+        : {
+            type: "thread.turn.interrupt",
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            createdAt: new Date().toISOString(),
+          },
+    );
   };
 
   const onRespondToApproval = useCallback(
@@ -4182,7 +4191,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             type="button"
                             className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
                             onClick={() => void onInterrupt()}
-                            aria-label="Stop generation"
+                            aria-label={
+                              activeThread?.interactionMode === "auto"
+                                ? "Stop auto mode"
+                                : "Stop generation"
+                            }
                           >
                             <svg
                               width="12"
