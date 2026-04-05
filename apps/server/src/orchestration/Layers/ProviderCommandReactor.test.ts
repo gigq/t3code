@@ -1625,4 +1625,84 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.activeTurnId).toBeNull();
   });
+
+  it("turns off auto mode when stopping an auto thread", async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+      const autoDeferUntil = new Date(Date.parse(now) + 15 * 60_000).toISOString();
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.makeUnsafe("cmd-session-stop-auto-mode-set"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          interactionMode: "auto",
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.auto-defer.set",
+          commandId: CommandId.makeUnsafe("cmd-session-stop-auto-defer-set"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          autoDeferUntil,
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("cmd-session-stop-auto-session-set"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      );
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("cmd-session-stop-auto"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          createdAt: now,
+        }),
+      );
+
+      await waitFor(() => harness.stopSession.mock.calls.length === 1);
+      await waitFor(async () => {
+        const readModel = await Effect.runPromise(harness.engine.getReadModel());
+        const thread = readModel.threads.find(
+          (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+        );
+        return (
+          thread?.interactionMode === "default" &&
+          thread.autoDeferUntil === null &&
+          thread.session?.status === "stopped"
+        );
+      });
+
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+      expect(thread?.interactionMode).toBe("default");
+      expect(thread?.autoDeferUntil).toBeNull();
+      expect(thread?.session?.status).toBe("stopped");
+
+      vi.advanceTimersByTime(20 * 60_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

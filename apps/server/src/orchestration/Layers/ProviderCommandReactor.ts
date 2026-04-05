@@ -909,6 +909,16 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
+    if (thread.interactionMode === "auto") {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: serverCommandId("provider-auto-stop-interaction-mode-set"),
+        threadId: thread.id,
+        interactionMode: "default",
+        createdAt: now,
+      });
+    }
+
     if (thread.session && thread.session.status !== "stopped") {
       yield* providerService.stopSession({ threadId: thread.id });
     }
