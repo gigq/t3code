@@ -747,6 +747,56 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
+  it("applies hidden auto defer controls from assistant completion text", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-auto-defer-hidden-control"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-auto-defer-hidden-control"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-auto-defer-hidden-control",
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-auto-defer-hidden-control-assistant-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-defer-hidden-control"),
+      itemId: asItemId("item-turn-auto-defer-hidden-control-assistant"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: '<t3code:auto-defer preset="15m" />',
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.autoDeferUntil !== null &&
+        entry.activities.some((activity) => activity.kind === "auto.defer.set"),
+    );
+
+    expect(thread.autoDeferUntil).not.toBeNull();
+    expect(thread.messages.at(-1)?.text).toBe("<t3code:auto-noop />");
+    expect(thread.activities.at(-1)).toMatchObject({
+      kind: "auto.defer.set",
+      summary: "Auto waiting",
+    });
+  });
+
   it("does not complete a turn early when session ready arrives before later turn activity", async () => {
     process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "200";
     const harness = await createHarness();

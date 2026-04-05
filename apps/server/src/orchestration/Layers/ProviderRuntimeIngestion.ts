@@ -739,7 +739,6 @@ const make = Effect.fn("make")(function* () {
     commandTag: string;
     finalDeltaCommandTag: string;
     fallbackText?: string;
-    autoModeEnabled?: boolean;
   }) {
     const bufferedText = yield* takeBufferedAssistantText(input.messageId);
     const rawText =
@@ -748,10 +747,7 @@ const make = Effect.fn("make")(function* () {
         : (input.fallbackText?.trim().length ?? 0) > 0
           ? input.fallbackText!
           : "";
-    const autoModeControl =
-      input.autoModeEnabled === true
-        ? parseAutoModeControlMessage(rawText, new Date(input.createdAt))
-        : null;
+    const autoModeControl = parseAutoModeControlMessage(rawText, new Date(input.createdAt));
     const text = autoModeControl?.kind === "defer" ? AUTO_MODE_NOOP_SENTINEL : rawText;
 
     if (text.length > 0) {
@@ -1442,7 +1438,6 @@ const make = Effect.fn("make")(function* () {
         ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
           ? { fallbackText: assistantCompletion.fallbackText }
           : {}),
-        autoModeEnabled: thread.interactionMode === "auto",
       });
 
       if (turnId) {
@@ -1520,7 +1515,6 @@ const make = Effect.fn("make")(function* () {
               createdAt: now,
               commandTag: "assistant-complete-finalize",
               finalDeltaCommandTag: "assistant-delta-finalize-fallback",
-              autoModeEnabled: thread.interactionMode === "auto",
             }),
           { concurrency: 1 },
         ).pipe(Effect.asVoid);
