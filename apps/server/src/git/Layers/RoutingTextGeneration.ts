@@ -18,6 +18,7 @@ import {
 } from "../Services/TextGeneration.ts";
 import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
+import { OpenCodeTextGenerationLive } from "./OpenCodeTextGeneration.ts";
 
 // ---------------------------------------------------------------------------
 // Internal service tags so both concrete layers can coexist.
@@ -31,6 +32,10 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
 ) {}
 
+class OpenCodeTextGen extends ServiceMap.Service<OpenCodeTextGen, TextGenerationShape>()(
+  "t3/git/Layers/RoutingTextGeneration/OpenCodeTextGen",
+) {}
+
 // ---------------------------------------------------------------------------
 // Routing implementation
 // ---------------------------------------------------------------------------
@@ -38,9 +43,10 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
+  const openCode = yield* OpenCodeTextGen;
 
   const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider === "claudeAgent" ? claude : codex;
+    provider === "claudeAgent" ? claude : provider === "opencode" ? openCode : codex;
 
   return {
     generateCommitMessage: (input) =>
@@ -78,7 +84,19 @@ const InternalClaudeLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ClaudeTextGenerationLive));
 
+const InternalOpenCodeLayer = Layer.effect(
+  OpenCodeTextGen,
+  Effect.gen(function* () {
+    const svc = yield* TextGeneration;
+    return svc;
+  }),
+).pipe(Layer.provide(OpenCodeTextGenerationLive));
+
 export const RoutingTextGenerationLive = Layer.effect(
   TextGeneration,
   makeRoutingTextGeneration,
-).pipe(Layer.provide(InternalCodexLayer), Layer.provide(InternalClaudeLayer));
+).pipe(
+  Layer.provide(InternalCodexLayer),
+  Layer.provide(InternalClaudeLayer),
+  Layer.provide(InternalOpenCodeLayer),
+);
