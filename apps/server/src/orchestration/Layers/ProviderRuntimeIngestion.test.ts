@@ -2118,6 +2118,102 @@ describe("ProviderRuntimeIngestion", () => {
     expect(finalMessage?.streaming).toBe(false);
   });
 
+  it("applies auto defer controls for streamed assistant messages", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-mode-streaming"),
+        threadId: asThreadId("thread-1"),
+        interactionMode: "auto",
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-auto-defer-streaming"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-defer-streaming"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-auto-defer-streaming",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-auto-defer-streaming"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-defer-streaming"),
+      itemId: asItemId("item-auto-defer-streaming"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: '<t3code:auto-defer preset="15m" />',
+      },
+    });
+
+    const liveThread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-auto-defer-streaming" &&
+          message.streaming &&
+          message.text === '<t3code:auto-defer preset="15m" />',
+      ),
+    );
+    const liveMessage = liveThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-auto-defer-streaming",
+    );
+    expect(liveMessage?.streaming).toBe(true);
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-auto-defer-streaming"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-defer-streaming"),
+      itemId: asItemId("item-auto-defer-streaming"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.autoDeferUntil !== null &&
+        entry.activities.some((activity) => activity.kind === "auto.defer.set") &&
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-auto-defer-streaming" &&
+            !message.streaming &&
+            message.text === '<t3code:auto-defer preset="15m" />',
+        ),
+    );
+
+    expect(thread.autoDeferUntil).not.toBeNull();
+    const deferredUntilMs = Date.parse(thread.autoDeferUntil ?? "");
+    const createdAtMs = Date.parse(now);
+    expect(Number.isNaN(deferredUntilMs)).toBe(false);
+    expect(deferredUntilMs - createdAtMs).toBeGreaterThanOrEqual(14 * 60_000);
+    expect(deferredUntilMs - createdAtMs).toBeLessThanOrEqual(16 * 60_000);
+    expect(thread.activities.at(-1)).toMatchObject({
+      kind: "auto.defer.set",
+      summary: "Auto waiting",
+    });
+  });
+
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

@@ -739,18 +739,25 @@ const make = Effect.fn("make")(function* () {
     commandTag: string;
     finalDeltaCommandTag: string;
     fallbackText?: string;
+    existingText?: string;
   }) {
     const bufferedText = yield* takeBufferedAssistantText(input.messageId);
+    const fallbackText = (input.fallbackText?.trim().length ?? 0) > 0 ? input.fallbackText! : "";
+    const existingText = (input.existingText?.trim().length ?? 0) > 0 ? input.existingText! : "";
     const rawText =
       bufferedText.length > 0
         ? bufferedText
-        : (input.fallbackText?.trim().length ?? 0) > 0
-          ? input.fallbackText!
-          : "";
+        : fallbackText.length > 0
+          ? fallbackText
+          : existingText;
     const autoModeControl = parseAutoModeControlMessage(rawText, new Date(input.createdAt));
-    const text = autoModeControl?.kind === "defer" ? AUTO_MODE_NOOP_SENTINEL : rawText;
+    const shouldEmitCompletionDelta = bufferedText.length > 0 || fallbackText.length > 0;
+    const text =
+      autoModeControl?.kind === "defer" && shouldEmitCompletionDelta
+        ? AUTO_MODE_NOOP_SENTINEL
+        : rawText;
 
-    if (text.length > 0) {
+    if (shouldEmitCompletionDelta && text.length > 0) {
       yield* orchestrationEngine.dispatch({
         type: "thread.message.assistant.delta",
         commandId: providerCommandId(input.event, input.finalDeltaCommandTag),
@@ -1438,6 +1445,7 @@ const make = Effect.fn("make")(function* () {
         ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
           ? { fallbackText: assistantCompletion.fallbackText }
           : {}),
+        ...(existingAssistantMessage?.text ? { existingText: existingAssistantMessage.text } : {}),
       });
 
       if (turnId) {
@@ -1506,8 +1514,11 @@ const make = Effect.fn("make")(function* () {
         });
         yield* Effect.forEach(
           assistantMessageIds,
-          (assistantMessageId) =>
-            finalizeAssistantMessage({
+          (assistantMessageId) => {
+            const existingAssistantMessage = thread.messages.find(
+              (entry) => entry.id === assistantMessageId,
+            );
+            return finalizeAssistantMessage({
               event,
               threadId: thread.id,
               messageId: assistantMessageId,
@@ -1515,7 +1526,11 @@ const make = Effect.fn("make")(function* () {
               createdAt: now,
               commandTag: "assistant-complete-finalize",
               finalDeltaCommandTag: "assistant-delta-finalize-fallback",
-            }),
+              ...(existingAssistantMessage?.text
+                ? { existingText: existingAssistantMessage.text }
+                : {}),
+            });
+          },
           { concurrency: 1 },
         ).pipe(Effect.asVoid);
         yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
