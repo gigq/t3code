@@ -1,6 +1,7 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import { isAutoModeDeferred, type AutoModeDeferPreset } from "@t3tools/shared/autoMode";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon, ListTodoIcon } from "lucide-react";
+import { Clock3Icon, EllipsisIcon, ListTodoIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -15,10 +16,12 @@ import {
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
   interactionMode: ProviderInteractionMode;
+  autoDeferUntil?: string | null;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
   traitsMenuContent?: ReactNode;
-  onToggleInteractionMode: () => void;
+  onSelectInteractionMode: (mode: ProviderInteractionMode) => void;
+  onSetAutoDeferUntil?: (value: AutoModeDeferPreset | null) => void;
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
@@ -48,12 +51,37 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           value={props.interactionMode}
           onValueChange={(value) => {
             if (!value || value === props.interactionMode) return;
-            props.onToggleInteractionMode();
+            props.onSelectInteractionMode(value as ProviderInteractionMode);
           }}
         >
           <MenuRadioItem value="default">Chat</MenuRadioItem>
           <MenuRadioItem value="plan">Plan</MenuRadioItem>
+          <MenuRadioItem value="auto">Auto</MenuRadioItem>
         </MenuRadioGroup>
+        {props.interactionMode === "auto" && props.onSetAutoDeferUntil ? (
+          <>
+            <MenuDivider />
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Wait</div>
+            <MenuItem onClick={() => props.onSetAutoDeferUntil?.("15m")}>
+              <Clock3Icon className="size-4 shrink-0" />
+              Defer 15m
+            </MenuItem>
+            <MenuItem onClick={() => props.onSetAutoDeferUntil?.("1h")}>
+              <Clock3Icon className="size-4 shrink-0" />
+              Defer 1h
+            </MenuItem>
+            <MenuItem onClick={() => props.onSetAutoDeferUntil?.("tomorrow-8am")}>
+              <Clock3Icon className="size-4 shrink-0" />
+              Defer until tomorrow 8am
+            </MenuItem>
+            {isAutoModeDeferred(props.autoDeferUntil) ? (
+              <MenuItem onClick={() => props.onSetAutoDeferUntil?.(null)}>
+                <Clock3Icon className="size-4 shrink-0" />
+                Resume auto now
+              </MenuItem>
+            ) : null}
+          </>
+        ) : null}
         <MenuDivider />
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
         <MenuRadioGroup

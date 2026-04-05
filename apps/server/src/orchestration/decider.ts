@@ -161,6 +161,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
+          autoDeferUntil: command.autoDeferUntil ?? null,
           branch: command.branch,
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
@@ -288,26 +289,100 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.interaction-mode.set": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
       const occurredAt = nowIso();
-      return {
+      const interactionModeSetEvent = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt,
           commandId: command.commandId,
         }),
-        type: "thread.interaction-mode-set",
+        type: "thread.interaction-mode-set" as const,
         payload: {
           threadId: command.threadId,
           interactionMode: command.interactionMode,
           updatedAt: occurredAt,
         },
       };
+
+      if (command.interactionMode === "auto" || thread.autoDeferUntil === null) {
+        return interactionModeSetEvent;
+      }
+
+      return [
+        interactionModeSetEvent,
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.auto-defer-set" as const,
+          payload: {
+            threadId: command.threadId,
+            autoDeferUntil: null,
+            updatedAt: occurredAt,
+          },
+        },
+      ];
+    }
+
+    case "thread.auto-defer.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      const autoDeferSetEvent = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.auto-defer-set" as const,
+        payload: {
+          threadId: command.threadId,
+          autoDeferUntil: command.autoDeferUntil,
+          updatedAt: occurredAt,
+        },
+      };
+      if (command.autoDeferUntil === null) {
+        return autoDeferSetEvent;
+      }
+      return [
+        autoDeferSetEvent,
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.activity-appended" as const,
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: crypto.randomUUID() as OrchestrationEvent["eventId"],
+              tone: "tool" as const,
+              kind: "auto.defer.set",
+              summary: "Auto waiting",
+              payload: {
+                autoDeferUntil: command.autoDeferUntil,
+              },
+              turnId: null,
+              createdAt: occurredAt,
+            },
+          },
+        },
+      ];
     }
 
     case "thread.turn.start": {

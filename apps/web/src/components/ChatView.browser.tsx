@@ -252,6 +252,7 @@ function createSnapshotForTargetUser(options: {
           model: "gpt-5",
         },
         interactionMode: "default",
+        autoDeferUntil: null,
         runtimeMode: "full-access",
         branch: "main",
         worktreePath: null,
@@ -310,6 +311,7 @@ function addThreadToSnapshot(
           model: "gpt-5",
         },
         interactionMode: "default",
+        autoDeferUntil: null,
         runtimeMode: "full-access",
         branch: "main",
         worktreePath: null,
@@ -622,7 +624,7 @@ async function waitForSendButton(): Promise<HTMLButtonElement> {
 }
 
 async function waitForInteractionModeButton(
-  expectedLabel: "Chat" | "Plan",
+  expectedLabel: "Chat" | "Plan" | "Auto",
 ): Promise<HTMLButtonElement> {
   return waitForElement(
     () =>

@@ -82,6 +82,7 @@ describe("orchestration projector", () => {
         },
         runtimeMode: "full-access",
         interactionMode: "default",
+        autoDeferUntil: null,
         branch: null,
         worktreePath: null,
         latestTurn: null,
@@ -297,6 +298,80 @@ describe("orchestration projector", () => {
       ),
     );
     expect(unarchived.threads[0]?.archivedAt).toBeNull();
+  });
+
+  it("applies thread.auto-defer-set events", async () => {
+    const now = new Date().toISOString();
+    const deferredUntil = new Date(Date.parse(now) + 60 * 60_000).toISOString();
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "auto",
+            autoDeferUntil: null,
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    const deferred = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "thread.auto-defer-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: deferredUntil,
+          commandId: "cmd-thread-auto-defer",
+          payload: {
+            threadId: "thread-1",
+            autoDeferUntil: deferredUntil,
+            updatedAt: deferredUntil,
+          },
+        }),
+      ),
+    );
+    expect(deferred.threads[0]?.autoDeferUntil).toBe(deferredUntil);
+
+    const resumed = await Effect.runPromise(
+      projectEvent(
+        deferred,
+        makeEvent({
+          sequence: 3,
+          type: "thread.auto-defer-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: new Date(Date.parse(deferredUntil) + 1_000).toISOString(),
+          commandId: "cmd-thread-auto-defer-clear",
+          payload: {
+            threadId: "thread-1",
+            autoDeferUntil: null,
+            updatedAt: new Date(Date.parse(deferredUntil) + 1_000).toISOString(),
+          },
+        }),
+      ),
+    );
+    expect(resumed.threads[0]?.autoDeferUntil).toBeNull();
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {

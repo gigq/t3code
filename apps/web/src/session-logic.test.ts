@@ -768,6 +768,34 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("keeps auto defer entries visible and formats the wake time", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "auto-defer",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "auto.defer.set",
+        summary: "Auto waiting",
+        payload: {
+          autoDeferUntil: "2026-02-23T08:00:00.000Z",
+        },
+      }),
+      makeActivity({
+        id: "other-turn",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        turnId: "turn-1",
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-1"));
+    expect(entry).toMatchObject({
+      id: "auto-defer",
+      label: "Auto waiting",
+    });
+    expect(entry?.detail).toMatch(/^Until /);
+  });
+
   it("collapses repeated lifecycle updates for the same tool call into one entry", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

@@ -74,6 +74,7 @@ describe("ProviderCommandReactor", () => {
   const createdBaseDirs = new Set<string>();
 
   afterEach(async () => {
+    vi.useRealTimers();
     if (scope) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
@@ -709,6 +710,52 @@ describe("ProviderCommandReactor", () => {
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId: ThreadId.makeUnsafe("thread-1"),
       interactionMode: "plan",
+    });
+  });
+
+  it("retries auto-mode wakes after an interrupted session state", async () => {
+    vi.useFakeTimers();
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-interaction-mode-set-auto"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        interactionMode: "auto",
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-session-set-interrupted"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "interrupted",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: "Claude runtime interrupted.",
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    vi.advanceTimersByTime(119_000);
+    await Promise.resolve();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(6_000);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(harness.sendTurn.mock.calls.length).toBe(1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      interactionMode: "auto",
     });
   });
 

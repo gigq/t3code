@@ -23,6 +23,7 @@ import {
   BotIcon,
   CheckIcon,
   CircleAlertIcon,
+  Clock3Icon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
@@ -810,6 +811,7 @@ function workEntryPreview(
 }
 
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
+  if (workEntry.label === "Auto waiting") return Clock3Icon;
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
   if (workEntry.requestKind === "file-change") return SquarePenIcon;

@@ -16,6 +16,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     },
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
+    autoDeferUntil: null,
     session: null,
     messages: [],
     turnDiffSummaries: [],

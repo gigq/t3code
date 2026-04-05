@@ -987,6 +987,16 @@ describe("composerDraftStore runtime and interaction settings", () => {
     );
   });
 
+  it("stores auto interaction mode overrides in the composer draft", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setInteractionMode(threadId, "auto");
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.interactionMode).toBe(
+      "auto",
+    );
+  });
+
   it("removes empty settings-only drafts when overrides are cleared", () => {
     const store = useComposerDraftStore.getState();
 

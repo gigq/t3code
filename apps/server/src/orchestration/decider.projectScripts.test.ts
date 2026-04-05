@@ -141,6 +141,7 @@ describe("decider project scripts", () => {
             model: "gpt-5-codex",
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          autoDeferUntil: null,
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
@@ -250,6 +251,7 @@ describe("decider project scripts", () => {
             model: "gpt-5-codex",
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          autoDeferUntil: null,
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
@@ -332,6 +334,7 @@ describe("decider project scripts", () => {
             model: "gpt-5-codex",
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          autoDeferUntil: null,
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
@@ -363,6 +366,192 @@ describe("decider project scripts", () => {
       payload: {
         threadId: ThreadId.makeUnsafe("thread-1"),
         interactionMode: "plan",
+      },
+    });
+  });
+
+  it("clears auto defer when switching away from auto mode", async () => {
+    const now = new Date().toISOString();
+    const deferredUntil = new Date(Date.parse(now) + 15 * 60_000).toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-auto-defer"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-1"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-auto-defer"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-auto-defer"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-auto-defer"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-1"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-create-auto-defer"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-create-auto-defer"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          projectId: asProjectId("project-1"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          interactionMode: "auto",
+          autoDeferUntil: deferredUntil,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.makeUnsafe("cmd-interaction-mode-clear-defer"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          interactionMode: "default",
+          createdAt: now,
+        },
+        readModel,
+      }),
+    );
+
+    const events = Array.isArray(result) ? result : [result];
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "thread.interaction-mode-set",
+      payload: {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        interactionMode: "default",
+      },
+    });
+    expect(events[1]).toMatchObject({
+      type: "thread.auto-defer-set",
+      payload: {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        autoDeferUntil: null,
+      },
+    });
+  });
+
+  it("emits an auto waiting activity when deferring auto mode", async () => {
+    const now = new Date().toISOString();
+    const deferredUntil = new Date(Date.parse(now) + 60 * 60_000).toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-auto-waiting"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-1"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-auto-waiting"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-auto-waiting"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-auto-waiting"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-1"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-create-auto-waiting"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-create-auto-waiting"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          projectId: asProjectId("project-1"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          interactionMode: "auto",
+          autoDeferUntil: null,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.auto-defer.set",
+          commandId: CommandId.makeUnsafe("cmd-thread-auto-defer"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          autoDeferUntil: deferredUntil,
+          createdAt: now,
+        },
+        readModel,
+      }),
+    );
+
+    const events = Array.isArray(result) ? result : [result];
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "thread.auto-defer-set",
+      payload: {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        autoDeferUntil: deferredUntil,
+      },
+    });
+    expect(events[1]).toMatchObject({
+      type: "thread.activity-appended",
+      payload: {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        activity: {
+          tone: "tool",
+          kind: "auto.defer.set",
+          summary: "Auto waiting",
+          payload: {
+            autoDeferUntil: deferredUntil,
+          },
+          turnId: null,
+        },
       },
     });
   });

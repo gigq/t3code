@@ -4,6 +4,7 @@ import type {
   OrchestrationReadModel,
   ThreadCompletionNotificationPayload,
 } from "@t3tools/contracts";
+import { isAutoModeNoopMessage } from "@t3tools/shared/autoMode";
 
 const MAX_BODY_CHARS = 160;
 const DEFAULT_NOTIFICATION_TITLE = "Thread completed";
@@ -67,6 +68,10 @@ function resolveAssistantMessageText(
           right.createdAt.localeCompare(left.createdAt),
       )[0];
 
+  if (message && isAutoModeNoopMessage(message.text)) {
+    return "";
+  }
+
   return normalizeNotificationBody(message?.text ?? "");
 }
 
@@ -84,16 +89,20 @@ export function buildThreadCompletionNotification(
   const project = snapshot.projects.find(
     (candidate) => candidate.id === thread?.projectId && candidate.deletedAt === null,
   );
+  const body = resolveAssistantMessageText(
+    snapshot,
+    event.payload.threadId,
+    event.payload.turnId,
+    event.payload.assistantMessageId,
+  );
+  if (body.length === 0) {
+    return null;
+  }
 
   return {
     threadId: event.payload.threadId,
     title: resolveNotificationTitle(project?.title ?? null, thread?.title ?? null),
-    body: resolveAssistantMessageText(
-      snapshot,
-      event.payload.threadId,
-      event.payload.turnId,
-      event.payload.assistantMessageId,
-    ),
+    body,
     tag: `thread-completed:${event.payload.turnId}`,
     urlPath: `/${event.payload.threadId}`,
   };

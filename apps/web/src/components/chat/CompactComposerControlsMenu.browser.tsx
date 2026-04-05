@@ -115,6 +115,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
     <CompactComposerControlsMenu
       activePlan={false}
       interactionMode="default"
+      autoDeferUntil={null}
       planSidebarOpen={false}
       runtimeMode="approval-required"
       traitsMenuContent={
@@ -128,7 +129,8 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
           onPromptChange={onPromptChange}
         />
       }
-      onToggleInteractionMode={vi.fn()}
+      onSelectInteractionMode={vi.fn()}
+      onSetAutoDeferUntil={vi.fn()}
       onTogglePlanSidebar={vi.fn()}
       onToggleRuntimeMode={vi.fn()}
     />,

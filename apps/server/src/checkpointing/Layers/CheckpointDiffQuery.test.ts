@@ -48,6 +48,7 @@ function makeSnapshot(input: {
           model: "gpt-5-codex",
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        autoDeferUntil: null,
         runtimeMode: "full-access",
         branch: null,
         worktreePath: input.worktreePath,

@@ -257,6 +257,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
         },
         runtimeMode: thread.runtimeMode,
         interactionMode: thread.interactionMode,
+        autoDeferUntil: thread.autoDeferUntil,
         session: thread.session
           ? {
               provider: toLegacyProvider(thread.session.providerName),

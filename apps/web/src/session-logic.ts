@@ -460,7 +460,9 @@ export function deriveWorkLogEntries(
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries = ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+    .filter((activity) =>
+      latestTurnId ? activity.turnId === latestTurnId || activity.kind === "auto.defer.set" : true,
+    )
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.kind !== "context-window.updated")
@@ -507,6 +509,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       entry.detail = detail;
     }
   }
+  if (activity.kind === "auto.defer.set") {
+    const detail = formatAutoDeferWorkLogDetail(payload?.autoDeferUntil);
+    if (detail) {
+      entry.detail = detail;
+    }
+  }
   if (command) {
     entry.command = command;
   }
@@ -527,6 +535,20 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.collapseKey = collapseKey;
   }
   return entry;
+}
+
+function formatAutoDeferWorkLogDetail(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return `Until ${new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed)}`;
 }
 
 function collapseDerivedWorkLogEntries(

@@ -1048,25 +1048,22 @@ const make = Effect.fn("make")(function* () {
           assistantMessageId: input.assistantMessageId,
         });
         yield* clearTurnCompletionTracking(input.threadId, input.turnId);
-      })
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("provider runtime ingestion fallback completion failed", {
-              threadId: input.threadId,
-              turnId: input.turnId,
-              assistantMessageId: input.assistantMessageId,
-              cause: Cause.pretty(cause),
-            }),
-          ),
-        )
-        .pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              pendingTurnCompletionFallbacks.delete(key);
-            }),
-          ),
-          Effect.forkScoped,
-        );
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider runtime ingestion fallback completion failed", {
+            threadId: input.threadId,
+            turnId: input.turnId,
+            assistantMessageId: input.assistantMessageId,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            pendingTurnCompletionFallbacks.delete(key);
+          }),
+        ),
+        Effect.forkScoped,
+      );
 
       pendingTurnCompletionFallbacks.set(key, {
         fiber,
@@ -1210,6 +1207,10 @@ const make = Effect.fn("make")(function* () {
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
     const activeTurnId = thread.session?.activeTurnId ?? null;
+    const shouldDeferReadySessionTransition =
+      event.type === "session.state.changed" &&
+      event.payload.state === "ready" &&
+      activeTurnId !== null;
 
     const conflictsWithActiveTurn =
       activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -1237,6 +1238,8 @@ const make = Effect.fn("make")(function* () {
           }
           // If no active turn is tracked, accept completion scoped to this thread.
           return true;
+        case "session.state.changed":
+          return !shouldDeferReadySessionTransition;
         default:
           return true;
       }
@@ -1328,25 +1331,6 @@ const make = Effect.fn("make")(function* () {
           createdAt: now,
         });
       }
-    }
-
-    if (
-      event.type === "session.state.changed" &&
-      event.payload.state === "ready" &&
-      activeTurnId !== null
-    ) {
-      const tracking = turnCompletionTrackingByTurnKey.get(
-        providerTurnKey(thread.id, activeTurnId),
-      );
-      yield* dispatchThreadTurnCompleted({
-        event,
-        threadId: thread.id,
-        turnId: activeTurnId,
-        assistantMessageId: tracking?.assistantMessageId ?? null,
-        state: "completed",
-        completedAt: now,
-      });
-      yield* clearTurnCompletionTracking(thread.id, activeTurnId);
     }
 
     const assistantDelta =
@@ -1472,6 +1456,24 @@ const make = Effect.fn("make")(function* () {
         ...(proposedPlanCompletion.turnId ? { turnId: proposedPlanCompletion.turnId } : {}),
         fallbackMarkdown: proposedPlanCompletion.planMarkdown,
         updatedAt: now,
+      });
+    }
+
+    if (shouldDeferReadySessionTransition) {
+      const tracking = getOrCreateTurnCompletionTracking(thread.id, activeTurnId);
+      yield* schedulePendingTurnCompletionFallback({
+        event,
+        threadId: thread.id,
+        turnId: activeTurnId,
+        assistantMessageId: tracking.assistantMessageId,
+        activitySequence: tracking.activitySequence,
+      });
+      yield* Effect.logInfo("provider runtime ingestion deferred ready session transition", {
+        threadId: thread.id,
+        turnId: activeTurnId,
+        assistantMessageId: tracking.assistantMessageId,
+        activitySequence: tracking.activitySequence,
+        activeToolItemCount: tracking.activeToolItemIds.size,
       });
     }
 

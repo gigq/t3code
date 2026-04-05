@@ -4,7 +4,9 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationThread,
   ProviderKind,
+  type ProviderInteractionMode,
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
@@ -13,6 +15,14 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import {
+  AUTO_MODE_POLL_INTERVAL_MS,
+  AUTO_MODE_RETRY_DELAY_MS,
+  AUTO_MODE_WAKE_DELAY_MS,
+  buildAutoModeTickPrompt,
+  isAutoModeDeferred,
+  parseAutoModeDeferUntilMs,
+} from "@t3tools/shared/autoMode";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -31,7 +41,11 @@ type ProviderIntentEvent = Extract<
   OrchestrationEvent,
   {
     type:
+      | "thread.interaction-mode-set"
+      | "thread.auto-defer-set"
       | "thread.runtime-mode-set"
+      | "thread.session-set"
+      | "thread.turn-completed"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
@@ -57,6 +71,7 @@ const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 const DEFAULT_THREAD_TITLE = "New thread";
+const AUTO_MODE_INITIAL_WAKE_DELAY_MS = 10_000;
 
 function canReplaceThreadTitle(currentTitle: string, titleSeed?: string): boolean {
   const trimmedCurrentTitle = currentTitle.trim();
@@ -105,6 +120,39 @@ function isTemporaryWorktreeBranch(branch: string): boolean {
   return TEMP_WORKTREE_BRANCH_PATTERN.test(branch.trim().toLowerCase());
 }
 
+function isAutoThreadEligible(thread: OrchestrationThread): boolean {
+  if (thread.deletedAt !== null || thread.archivedAt !== null) {
+    return false;
+  }
+  if (thread.interactionMode !== "auto") {
+    return false;
+  }
+  const status = thread.session?.status ?? "idle";
+  return (
+    status === "idle" ||
+    status === "ready" ||
+    status === "stopped" ||
+    status === "interrupted" ||
+    status === "error"
+  );
+}
+
+function autoWakeDelayForThread(thread: OrchestrationThread, fallbackDelayMs: number): number {
+  const status = thread.session?.status ?? "idle";
+  if (status === "interrupted" || status === "error") {
+    return AUTO_MODE_RETRY_DELAY_MS;
+  }
+  return fallbackDelayMs;
+}
+
+function activeAutoDeferUntilMs(
+  thread: OrchestrationThread,
+  nowMs: number = Date.now(),
+): number | null {
+  const deferredUntilMs = parseAutoModeDeferUntilMs(thread.autoDeferUntil);
+  return deferredUntilMs !== null && deferredUntilMs > nowMs ? deferredUntilMs : null;
+}
+
 function buildGeneratedWorktreeBranchName(raw: string): string {
   const normalized = raw
     .trim()
@@ -148,6 +196,7 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  const autoWakeAtByThreadId = new Map<string, number>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -198,6 +247,79 @@ const make = Effect.gen(function* () {
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
     return readModel.threads.find((entry) => entry.id === threadId);
+  });
+
+  const clearAutoWake = Effect.fnUntraced(function* (threadId: ThreadId, reason: string) {
+    const previousWakeAt = autoWakeAtByThreadId.get(threadId);
+    autoWakeAtByThreadId.delete(threadId);
+    if (previousWakeAt === undefined) {
+      return;
+    }
+    yield* Effect.logInfo("provider command reactor cleared auto wake", {
+      threadId,
+      reason,
+      previousWakeAt,
+      previousWakeAtIso: new Date(previousWakeAt).toISOString(),
+    });
+  });
+
+  const scheduleAutoWake = Effect.fnUntraced(function* (
+    threadId: ThreadId,
+    delayMs: number,
+    options: {
+      readonly reason: string;
+      readonly status?: string | null;
+      readonly fromMs?: number;
+      readonly autoDeferUntil?: string | null;
+    },
+  ) {
+    const fromMs = options.fromMs ?? Date.now();
+    const normalizedDelayMs = Math.max(delayMs, 0);
+    const wakeAt = fromMs + normalizedDelayMs;
+    autoWakeAtByThreadId.set(threadId, wakeAt);
+    yield* Effect.logInfo("provider command reactor scheduled auto wake", {
+      threadId,
+      reason: options.reason,
+      status: options.status ?? null,
+      autoDeferUntil: options.autoDeferUntil ?? null,
+      delayMs: normalizedDelayMs,
+      wakeAt,
+      wakeAtIso: new Date(wakeAt).toISOString(),
+    });
+  });
+
+  const syncAutoWakeForThread = Effect.fnUntraced(function* (
+    thread: OrchestrationThread | undefined,
+    delayMs: number,
+    reason: string,
+  ) {
+    if (!thread) {
+      return;
+    }
+    if (!isAutoThreadEligible(thread)) {
+      yield* Effect.logInfo("provider command reactor skipped auto wake sync", {
+        threadId: thread.id,
+        reason,
+        interactionMode: thread.interactionMode,
+        sessionStatus: thread.session?.status ?? "idle",
+        archived: thread.archivedAt !== null,
+        deleted: thread.deletedAt !== null,
+      });
+      yield* clearAutoWake(thread.id, `sync-ineligible:${reason}`);
+      return;
+    }
+    const nowMs = Date.now();
+    const deferredUntilMs = activeAutoDeferUntilMs(thread, nowMs);
+    const effectiveDelayMs = Math.max(
+      autoWakeDelayForThread(thread, delayMs),
+      deferredUntilMs === null ? 0 : deferredUntilMs - nowMs,
+    );
+    yield* scheduleAutoWake(thread.id, effectiveDelayMs, {
+      reason,
+      status: thread.session?.status ?? "idle",
+      fromMs: nowMs,
+      autoDeferUntil: thread.autoDeferUntil,
+    });
   });
 
   const ensureSessionForThread = Effect.fnUntraced(function* (
@@ -342,7 +464,7 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
-    readonly interactionMode?: "default" | "plan";
+    readonly interactionMode?: ProviderInteractionMode;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -387,6 +509,108 @@ const make = Effect.gen(function* () {
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     });
+  });
+
+  const appendAutoWakeActivity = (threadId: ThreadId, createdAt: string) =>
+    orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: serverCommandId("auto-wake-activity"),
+      threadId,
+      activity: {
+        id: EventId.makeUnsafe(crypto.randomUUID()),
+        tone: "info",
+        kind: "auto.tick.started",
+        summary: "Auto mode continued in the background",
+        payload: {
+          mode: "auto",
+        },
+        turnId: null,
+        createdAt,
+      },
+      createdAt,
+    });
+
+  const triggerAutoWakeForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const thread = yield* resolveThread(threadId);
+    if (!thread) {
+      yield* clearAutoWake(threadId, "thread-missing");
+      return;
+    }
+    if (!isAutoThreadEligible(thread)) {
+      yield* Effect.logInfo("provider command reactor skipped auto wake trigger", {
+        threadId,
+        interactionMode: thread.interactionMode,
+        sessionStatus: thread.session?.status ?? "idle",
+        archived: thread.archivedAt !== null,
+        deleted: thread.deletedAt !== null,
+      });
+      yield* clearAutoWake(threadId, "trigger-ineligible");
+      return;
+    }
+    if (isAutoModeDeferred(thread.autoDeferUntil)) {
+      yield* Effect.logInfo(
+        "provider command reactor skipped auto wake trigger for deferred thread",
+        {
+          threadId,
+          autoDeferUntil: thread.autoDeferUntil,
+        },
+      );
+      yield* syncAutoWakeForThread(thread, 0, "trigger-deferred");
+      return;
+    }
+
+    yield* clearAutoWake(threadId, "trigger-fired");
+    const createdAt = new Date().toISOString();
+    yield* Effect.logInfo("provider command reactor firing auto wake", {
+      threadId,
+      createdAt,
+      sessionStatus: thread.session?.status ?? "idle",
+    });
+    yield* appendAutoWakeActivity(threadId, createdAt);
+    yield* sendTurnForThread({
+      threadId,
+      messageText: buildAutoModeTickPrompt(createdAt),
+      interactionMode: "auto",
+      createdAt,
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          yield* appendProviderFailureActivity({
+            threadId,
+            kind: "provider.turn.start.failed",
+            summary: "Background auto turn failed",
+            detail: Cause.pretty(cause),
+            turnId: null,
+            createdAt,
+          });
+          yield* scheduleAutoWake(threadId, AUTO_MODE_RETRY_DELAY_MS, {
+            reason: "trigger-failed-retry",
+            status: thread.session?.status ?? "idle",
+          });
+        }),
+      ),
+    );
+  });
+
+  const seedAutoWakeSchedule = Effect.fnUntraced(function* () {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    for (const thread of readModel.threads) {
+      if (thread.interactionMode === "auto") {
+        yield* syncAutoWakeForThread(thread, AUTO_MODE_INITIAL_WAKE_DELAY_MS, "seed");
+      } else {
+        yield* clearAutoWake(thread.id, "seed-non-auto");
+      }
+    }
+  });
+
+  const processAutoWakePass = Effect.fnUntraced(function* () {
+    const now = Date.now();
+    const dueThreadIds = [...autoWakeAtByThreadId.entries()]
+      .filter(([, wakeAt]) => wakeAt <= now)
+      .map(([threadId]) => ThreadId.makeUnsafe(threadId));
+    for (const threadId of dueThreadIds) {
+      yield* triggerAutoWakeForThread(threadId);
+    }
   });
 
   const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fnUntraced(function* (input: {
@@ -707,6 +931,20 @@ const make = Effect.gen(function* () {
   const processDomainEvent = (event: ProviderIntentEvent) =>
     Effect.gen(function* () {
       switch (event.type) {
+        case "thread.interaction-mode-set": {
+          const thread = yield* resolveThread(event.payload.threadId);
+          if (event.payload.interactionMode === "auto") {
+            yield* syncAutoWakeForThread(thread, AUTO_MODE_INITIAL_WAKE_DELAY_MS, event.type);
+          } else {
+            yield* clearAutoWake(event.payload.threadId, event.type);
+          }
+          return;
+        }
+        case "thread.auto-defer-set": {
+          const thread = yield* resolveThread(event.payload.threadId);
+          yield* syncAutoWakeForThread(thread, AUTO_MODE_INITIAL_WAKE_DELAY_MS, event.type);
+          return;
+        }
         case "thread.runtime-mode-set": {
           const thread = yield* resolveThread(event.payload.threadId);
           if (!thread?.session || thread.session.status === "stopped") {
@@ -720,7 +958,18 @@ const make = Effect.gen(function* () {
           );
           return;
         }
+        case "thread.session-set": {
+          const thread = yield* resolveThread(event.payload.threadId);
+          yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
+          return;
+        }
+        case "thread.turn-completed": {
+          const thread = yield* resolveThread(event.payload.threadId);
+          yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
+          return;
+        }
         case "thread.turn-start-requested":
+          yield* clearAutoWake(event.payload.threadId, event.type);
           yield* processTurnStartRequested(event);
           return;
         case "thread.turn-interrupt-requested":
@@ -733,6 +982,7 @@ const make = Effect.gen(function* () {
           yield* processUserInputResponseRequested(event);
           return;
         case "thread.session-stop-requested":
+          yield* clearAutoWake(event.payload.threadId, event.type);
           yield* processSessionStopRequested(event);
           return;
       }
@@ -753,24 +1003,39 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
 
-  const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
-    const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
-      if (
-        event.type === "thread.runtime-mode-set" ||
-        event.type === "thread.turn-start-requested" ||
-        event.type === "thread.turn-interrupt-requested" ||
-        event.type === "thread.approval-response-requested" ||
-        event.type === "thread.user-input-response-requested" ||
-        event.type === "thread.session-stop-requested"
-      ) {
-        return yield* worker.enqueue(event);
-      }
-    });
+  const start: ProviderCommandReactorShape["start"] = () =>
+    Effect.gen(function* () {
+      const processEvent = (event: OrchestrationEvent) => {
+        if (
+          event.type === "thread.interaction-mode-set" ||
+          event.type === "thread.auto-defer-set" ||
+          event.type === "thread.runtime-mode-set" ||
+          event.type === "thread.session-set" ||
+          event.type === "thread.turn-completed" ||
+          event.type === "thread.turn-start-requested" ||
+          event.type === "thread.turn-interrupt-requested" ||
+          event.type === "thread.approval-response-requested" ||
+          event.type === "thread.user-input-response-requested" ||
+          event.type === "thread.session-stop-requested"
+        ) {
+          return worker.enqueue(event);
+        }
+        return Effect.void;
+      };
 
-    yield* Effect.forkScoped(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
-    );
-  });
+      yield* seedAutoWakeSchedule();
+      yield* Effect.forkScoped(
+        Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
+      );
+      yield* Effect.forkScoped(
+        Effect.forever(
+          Effect.gen(function* () {
+            yield* processAutoWakePass();
+            yield* Effect.sleep(Duration.millis(AUTO_MODE_POLL_INTERVAL_MS));
+          }),
+        ),
+      );
+    });
 
   return {
     start,

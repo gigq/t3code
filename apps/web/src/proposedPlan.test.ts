@@ -76,6 +76,19 @@ describe("resolvePlanFollowUpSubmission", () => {
     });
   });
 
+  it("preserves auto mode when implementing the ready plan from auto mode", () => {
+    expect(
+      resolvePlanFollowUpSubmission({
+        draftText: "   ",
+        planMarkdown: "## Ship it\n\n- step 1\n",
+        implementationMode: "auto",
+      }),
+    ).toEqual({
+      text: "PLEASE IMPLEMENT THIS PLAN:\n## Ship it\n\n- step 1",
+      interactionMode: "auto",
+    });
+  });
+
   it("stays in plan mode when the user adds a follow-up prompt", () => {
     expect(
       resolvePlanFollowUpSubmission({

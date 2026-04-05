@@ -1,5 +1,6 @@
 import {
   type ApprovalRequestId,
+  type IsoDateTime,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
   type MessageId,
@@ -21,6 +22,12 @@ import {
   RuntimeMode,
 } from "@t3tools/contracts";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  isAutoModeDeferred,
+  isAutoModeNoopMessage,
+  resolveAutoModeDeferUntil,
+  type AutoModeDeferPreset,
+} from "@t3tools/shared/autoMode";
 import { truncate } from "@t3tools/shared/String";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -188,6 +195,67 @@ const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const INTERACTION_MODE_CYCLE_ORDER: readonly ProviderInteractionMode[] = [
+  "default",
+  "plan",
+  "auto",
+];
+
+function nextInteractionMode(current: ProviderInteractionMode): ProviderInteractionMode {
+  const currentIndex = INTERACTION_MODE_CYCLE_ORDER.indexOf(current);
+  if (currentIndex < 0) {
+    return "default";
+  }
+  return INTERACTION_MODE_CYCLE_ORDER[(currentIndex + 1) % INTERACTION_MODE_CYCLE_ORDER.length]!;
+}
+
+function formatAutoDeferredUntil(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return null;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
+function interactionModeLabel(
+  mode: ProviderInteractionMode,
+  autoDeferUntil: IsoDateTime | null | undefined,
+): string {
+  switch (mode) {
+    case "plan":
+      return "Plan";
+    case "auto":
+      return isAutoModeDeferred(autoDeferUntil) ? "Auto later" : "Auto";
+    default:
+      return "Chat";
+  }
+}
+
+function interactionModeTitle(
+  mode: ProviderInteractionMode,
+  autoDeferUntil: IsoDateTime | null | undefined,
+): string {
+  switch (mode) {
+    case "plan":
+      return "Plan mode — click to switch to auto mode";
+    case "auto":
+      if (isAutoModeDeferred(autoDeferUntil)) {
+        const formattedAutoDeferUntil = formatAutoDeferredUntil(autoDeferUntil);
+        return formattedAutoDeferUntil
+          ? `Auto mode is waiting until ${formattedAutoDeferUntil} — click to return to normal chat mode`
+          : "Auto mode is waiting — click to return to normal chat mode";
+      }
+      return "Auto mode — click to return to normal chat mode";
+    default:
+      return "Default mode — click to enter plan mode";
+  }
+}
 
 function formatOutgoingPrompt(params: {
   provider: ProviderKind;
@@ -488,6 +556,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  const preferredImplementationInteractionModeRef = useRef<"default" | "auto">("default");
+  useEffect(() => {
+    if (interactionMode !== "plan") {
+      preferredImplementationInteractionModeRef.current =
+        interactionMode === "auto" ? "auto" : "default";
+    }
+  }, [interactionMode]);
+  const preferredImplementationInteractionMode = preferredImplementationInteractionModeRef.current;
+  const autoDeferUntil = activeThread?.autoDeferUntil ?? null;
+  const autoModeDeferred = interactionMode === "auto" && isAutoModeDeferred(autoDeferUntil);
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
@@ -904,16 +982,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
             return changed ? { ...message, attachments } : message;
           });
+    const visibleServerMessages = serverMessagesWithPreviewHandoff.filter(
+      (message) => message.role !== "assistant" || !isAutoModeNoopMessage(message.text),
+    );
 
     if (optimisticUserMessages.length === 0) {
-      return serverMessagesWithPreviewHandoff;
+      return visibleServerMessages;
     }
-    const serverIds = new Set(serverMessagesWithPreviewHandoff.map((message) => message.id));
+    const serverIds = new Set(visibleServerMessages.map((message) => message.id));
     const pendingMessages = optimisticUserMessages.filter((message) => !serverIds.has(message.id));
     if (pendingMessages.length === 0) {
-      return serverMessagesWithPreviewHandoff;
+      return visibleServerMessages;
     }
-    return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
+    return [...visibleServerMessages, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
@@ -1100,6 +1181,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           command: "default",
           label: "/default",
           description: "Switch this thread back to normal chat mode",
+        },
+        {
+          id: "slash:auto",
+          type: "slash-command",
+          command: "auto",
+          label: "/auto",
+          description: "Continue this thread in the background when it is idle",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
@@ -1660,8 +1748,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
-  const toggleInteractionMode = useCallback(() => {
+  const handleAutoDeferChange = useCallback(
+    async (preset: AutoModeDeferPreset | null) => {
+      if (!serverThread) {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+      const createdAt = new Date().toISOString();
+      await api.orchestration.dispatchCommand({
+        type: "thread.auto-defer.set",
+        commandId: newCommandId(),
+        threadId,
+        autoDeferUntil: preset === null ? null : resolveAutoModeDeferUntil(preset),
+        createdAt,
+      });
+      scheduleComposerFocus();
+    },
+    [scheduleComposerFocus, serverThread, threadId],
+  );
+  const togglePlanInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
+  }, [handleInteractionModeChange, interactionMode]);
+  const cycleInteractionMode = useCallback(() => {
+    handleInteractionModeChange(nextInteractionMode(interactionMode));
   }, [handleInteractionModeChange, interactionMode]);
   const toggleRuntimeMode = useCallback(() => {
     void handleRuntimeModeChange(
@@ -2479,6 +2591,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
+        implementationMode: preferredImplementationInteractionMode,
       });
       promptRef.current = "";
       clearComposerDraftContent(activeThread.id);
@@ -2950,7 +3063,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       interactionMode: nextInteractionMode,
     }: {
       text: string;
-      interactionMode: "default" | "plan";
+      interactionMode: ProviderInteractionMode;
     }) => {
       const api = readNativeApi();
       if (
@@ -3023,7 +3136,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           titleSeed: activeThread.title,
           runtimeMode,
           interactionMode: nextInteractionMode,
-          ...(nextInteractionMode === "default" && activeProposedPlan
+          ...(nextInteractionMode !== "plan" && activeProposedPlan
             ? {
                 sourceProposedPlan: {
                   threadId: activeThread.id,
@@ -3034,9 +3147,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           createdAt: messageCreatedAt,
         });
         // Optimistically open the plan sidebar when implementing (not refining).
-        // "default" mode here means the agent is executing the plan, which produces
-        // step-tracking activities that the sidebar will display.
-        if (nextInteractionMode === "default") {
+        if (nextInteractionMode !== "plan") {
           planSidebarDismissedForTurnRef.current = null;
           setPlanSidebarOpen(true);
         }
@@ -3102,6 +3213,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     });
     const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
     const nextThreadModelSelection: ModelSelection = selectedModelSelection;
+    const implementationInteractionMode = preferredImplementationInteractionModeRef.current;
 
     sendInFlightRef.current = true;
     beginSendPhase("sending-turn");
@@ -3119,7 +3231,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         title: nextThreadTitle,
         modelSelection: nextThreadModelSelection,
         runtimeMode,
-        interactionMode: "default",
+        interactionMode: implementationInteractionMode,
         branch: activeThread.branch,
         worktreePath: activeThread.worktreePath,
         createdAt,
@@ -3138,7 +3250,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           modelSelection: selectedModelSelection,
           titleSeed: nextThreadTitle,
           runtimeMode,
-          interactionMode: "default",
+          interactionMode: implementationInteractionMode,
           createdAt,
         });
       })
@@ -3390,7 +3502,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        void handleInteractionModeChange(
+          item.command === "plan" ? "plan" : item.command === "auto" ? "auto" : "default",
+        );
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -3488,7 +3602,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     event: KeyboardEvent,
   ) => {
     if (key === "Tab" && event.shiftKey) {
-      toggleInteractionMode();
+      togglePlanInteractionMode();
       return true;
     }
 
@@ -3910,10 +4024,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               activePlan || sidebarProposedPlan || planSidebarOpen,
                             )}
                             interactionMode={interactionMode}
+                            autoDeferUntil={autoDeferUntil}
                             planSidebarOpen={planSidebarOpen}
                             runtimeMode={runtimeMode}
                             traitsMenuContent={providerTraitsMenuContent}
-                            onToggleInteractionMode={toggleInteractionMode}
+                            onSelectInteractionMode={handleInteractionModeChange}
+                            {...(isServerThread
+                              ? {
+                                  onSetAutoDeferUntil: (value: AutoModeDeferPreset | null) =>
+                                    void handleAutoDeferChange(value),
+                                }
+                              : {})}
                             onTogglePlanSidebar={togglePlanSidebar}
                             onToggleRuntimeMode={toggleRuntimeMode}
                           />
@@ -3936,19 +4057,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
                             <Button
                               variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                              className={cn(
+                                "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                                autoModeDeferred
+                                  ? "bg-amber-100/70 text-amber-900 hover:bg-amber-200/80 hover:text-amber-950"
+                                  : "text-muted-foreground/70 hover:text-foreground/80",
+                              )}
                               size="sm"
                               type="button"
-                              onClick={toggleInteractionMode}
-                              title={
-                                interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
-                                  : "Default mode — click to enter plan mode"
-                              }
+                              onClick={cycleInteractionMode}
+                              title={interactionModeTitle(interactionMode, autoDeferUntil)}
                             >
                               <BotIcon />
                               <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
+                                {interactionModeLabel(interactionMode, autoDeferUntil)}
                               </span>
                             </Button>
 

@@ -625,8 +625,8 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completedThread.latestTurn?.state).toBe("completed");
   });
 
-  it("synthesizes turn completion immediately when the provider session becomes ready", async () => {
-    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "60000";
+  it("synthesizes turn completion after a guarded delay when the provider session becomes ready", async () => {
+    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "100";
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -678,6 +678,131 @@ describe("ProviderRuntimeIngestion", () => {
         entry.session?.activeTurnId === null &&
         entry.latestTurn?.turnId === "turn-session-ready" &&
         entry.latestTurn?.assistantMessageId === "assistant:item-turn-session-ready-assistant",
+      1000,
+    );
+    expect(thread.latestTurn?.state).toBe("completed");
+  });
+
+  it("does not complete a turn early when session ready arrives before later turn activity", async () => {
+    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "200";
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-session-ready-deferred"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-session-ready-deferred"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-session-ready-deferred",
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-session-ready-deferred-assistant-completed-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-session-ready-deferred"),
+      itemId: asItemId("item-turn-session-ready-deferred-assistant-1"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "interim",
+      },
+    });
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-turn-session-ready-deferred-ready"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        state: "ready",
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-turn-session-ready-deferred-reasoning-started"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-session-ready-deferred"),
+      itemId: asItemId("reasoning-turn-session-ready-deferred"),
+      payload: {
+        itemType: "reasoning",
+        status: "inProgress",
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const midThread = await Effect.runPromise(harness.engine.getReadModel()).then((readModel) => {
+      const thread = readModel.threads.find(
+        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      );
+      if (!thread) {
+        throw new Error("Expected thread-1 to exist");
+      }
+      return thread;
+    });
+    expect(midThread.session?.status).toBe("running");
+    expect(midThread.session?.activeTurnId).toBe("turn-session-ready-deferred");
+
+    const midEvents = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    expect(
+      midEvents.some(
+        (event) =>
+          event.type === "thread.turn-completed" &&
+          event.payload.turnId === "turn-session-ready-deferred",
+      ),
+    ).toBe(false);
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-session-ready-deferred-reasoning-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-session-ready-deferred"),
+      itemId: asItemId("reasoning-turn-session-ready-deferred"),
+      payload: {
+        itemType: "reasoning",
+        status: "completed",
+      },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-session-ready-deferred-completed"),
+      provider: "codex",
+      createdAt: new Date().toISOString(),
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-session-ready-deferred"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.latestTurn?.turnId === "turn-session-ready-deferred",
       1000,
     );
     expect(thread.latestTurn?.state).toBe("completed");

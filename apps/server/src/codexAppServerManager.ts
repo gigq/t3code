@@ -289,6 +289,22 @@ The \`request_user_input\` tool is unavailable in Default mode. If you call it w
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
 </collaboration_mode>`;
 
+export const CODEX_AUTO_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Auto
+
+You are now in Auto mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
+
+You may receive hidden background tick prompts from the server. Treat them as internal wake-ups, not user-visible messages.
+
+When you receive an auto tick:
+
+* Inspect the current thread state before acting.
+* Only take action when there is a concrete useful next step.
+* Keep visible updates brief and outcome-focused.
+* If there is nothing worth doing right now, follow the tick prompt exactly.
+
+Do not claim you were asked by the user unless the user actually sent a message.
+</collaboration_mode>`;
+
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
   readonly approvalPolicy: "on-request" | "never";
   readonly sandbox: "workspace-write" | "danger-full-access";
@@ -332,7 +348,7 @@ export function normalizeCodexModelSlug(
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: "default" | "plan";
+  readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
   readonly effort?: string;
 }):
@@ -349,15 +365,18 @@ function buildCodexCollaborationMode(input: {
     return undefined;
   }
   const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
+  const protocolMode = input.interactionMode === "plan" ? "plan" : "default";
   return {
-    mode: input.interactionMode,
+    mode: protocolMode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",
       developer_instructions:
         input.interactionMode === "plan"
           ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+          : input.interactionMode === "auto"
+            ? CODEX_AUTO_MODE_DEVELOPER_INSTRUCTIONS
+            : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
     },
   };
 }

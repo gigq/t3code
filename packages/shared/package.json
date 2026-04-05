@@ -43,6 +43,10 @@
     "./codex": {
       "types": "./src/codex.ts",
       "import": "./src/codex.ts"
+    },
+    "./autoMode": {
+      "types": "./src/autoMode.ts",
+      "import": "./src/autoMode.ts"
     }
   },
   "scripts": {

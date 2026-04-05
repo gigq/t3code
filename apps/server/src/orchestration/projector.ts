@@ -17,6 +17,7 @@ import {
   ThreadArchivedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
+  ThreadAutoDeferSetPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
@@ -274,6 +275,7 @@ export function projectEvent(
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
+            autoDeferUntil: payload.autoDeferUntil,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
@@ -369,6 +371,17 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             interactionMode: payload.interactionMode,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.auto-defer-set":
+      return decodeForEvent(ThreadAutoDeferSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            autoDeferUntil: payload.autoDeferUntil,
             updatedAt: payload.updatedAt,
           }),
         })),
