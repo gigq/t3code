@@ -1731,11 +1731,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const handleInteractionModeChange = useCallback(
-    (mode: ProviderInteractionMode) => {
+    async (mode: ProviderInteractionMode) => {
       if (mode === interactionMode) return;
       setComposerDraftInteractionMode(threadId, mode);
       if (isLocalDraftThread) {
         setDraftThreadContext(threadId, { interactionMode: mode });
+      } else {
+        const api = readNativeApi();
+        if (api && serverThread && mode !== serverThread.interactionMode) {
+          await api.orchestration.dispatchCommand({
+            type: "thread.interaction-mode.set",
+            commandId: newCommandId(),
+            threadId,
+            interactionMode: mode,
+            createdAt: new Date().toISOString(),
+          });
+        }
       }
       scheduleComposerFocus();
     },
@@ -1743,6 +1754,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       interactionMode,
       isLocalDraftThread,
       scheduleComposerFocus,
+      serverThread,
       setComposerDraftInteractionMode,
       setDraftThreadContext,
       threadId,
@@ -1770,10 +1782,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [scheduleComposerFocus, serverThread, threadId],
   );
   const togglePlanInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
+    void handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
   const cycleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(nextInteractionMode(interactionMode));
+    void handleInteractionModeChange(nextInteractionMode(interactionMode));
   }, [handleInteractionModeChange, interactionMode]);
   const toggleRuntimeMode = useCallback(() => {
     void handleRuntimeModeChange(
