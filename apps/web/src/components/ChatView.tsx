@@ -97,6 +97,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleAlertIcon,
+  Clock3Icon,
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
@@ -1805,6 +1806,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return !open;
     });
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+
+  const canSendFromComposer = composerSendState.hasSendableContent;
+  const isAutoComposerAction = interactionMode === "auto";
+  const shouldShowAutoModeTimer =
+    isAutoComposerAction && !canSendFromComposer && !isConnecting && !isSendBusy;
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -4267,10 +4273,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             )
                           ) : (
                             <button
-                              type="submit"
-                              className="flex h-9 w-9 enabled:cursor-pointer items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
-                              disabled={
-                                isSendBusy || isConnecting || !composerSendState.hasSendableContent
+                              type={shouldShowAutoModeTimer ? "button" : "submit"}
+                              className={cn(
+                                "flex h-9 w-9 items-center justify-center rounded-full text-white transition-all duration-150 sm:h-8 sm:w-8",
+                                shouldShowAutoModeTimer || canSendFromComposer
+                                  ? "enabled:cursor-pointer hover:scale-105"
+                                  : "disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100",
+                                isAutoComposerAction
+                                  ? "bg-amber-500/90 hover:bg-amber-500"
+                                  : "bg-primary/90 text-primary-foreground hover:bg-primary",
+                              )}
+                              disabled={isSendBusy || isConnecting || (!shouldShowAutoModeTimer && !canSendFromComposer)}
+                              onClick={
+                                shouldShowAutoModeTimer
+                                  ? () => void handleInteractionModeChange("default")
+                                  : undefined
                               }
                               aria-label={
                                 isConnecting
@@ -4279,7 +4296,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                     ? "Preparing worktree"
                                     : isSendBusy
                                       ? "Sending"
-                                      : "Send message"
+                                      : shouldShowAutoModeTimer
+                                        ? "Turn off auto mode"
+                                        : "Send message"
                               }
                             >
                               {isConnecting || isSendBusy ? (
@@ -4301,6 +4320,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                     strokeDasharray="20 12"
                                   />
                                 </svg>
+                              ) : shouldShowAutoModeTimer ? (
+                                <Clock3Icon className="size-4" aria-hidden="true" />
                               ) : (
                                 <svg
                                   width="14"
