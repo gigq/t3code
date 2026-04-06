@@ -1243,6 +1243,7 @@ export default function Sidebar() {
             }}
           >
             <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+              {threadStatus && <ThreadStatusLabel status={threadStatus} />}
               {gitIndicators.map((gitIndicator) => (
                 <Tooltip key={gitIndicator.kind}>
                   <TooltipTrigger
@@ -1263,7 +1264,6 @@ export default function Sidebar() {
                   <TooltipPopup side="top">{gitIndicator.tooltip}</TooltipPopup>
                 </Tooltip>
               ))}
-              {threadStatus && <ThreadStatusLabel status={threadStatus} />}
               {renamingThreadId === thread.id ? (
                 <input
                   ref={(el) => {

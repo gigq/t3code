@@ -294,6 +294,7 @@ describe("isContextMenuPointerDown", () => {
 describe("resolveThreadStatusPill", () => {
   const baseThread = {
     interactionMode: "plan" as const,
+    autoDeferUntil: null,
     latestTurn: null,
     lastVisitedAt: undefined,
     proposedPlans: [],
@@ -334,6 +335,29 @@ describe("resolveThreadStatusPill", () => {
         hasPendingUserInput: false,
       }),
     ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows auto waiting for deferred auto threads that are not currently running", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "auto",
+          autoDeferUntil: "2099-03-09T10:15:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({
+      label: "Auto Waiting",
+      pulse: false,
+      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+    });
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
@@ -465,6 +489,12 @@ describe("resolveProjectStatusIndicator", () => {
           dotClass: "bg-sky-500",
           pulse: true,
         },
+        {
+          label: "Auto Waiting",
+          colorClass: "text-amber-600",
+          dotClass: "bg-amber-500",
+          pulse: false,
+        },
       ]),
     ).toMatchObject({ label: "Pending Approval", dotClass: "bg-amber-500" });
   });
@@ -486,6 +516,25 @@ describe("resolveProjectStatusIndicator", () => {
         },
       ]),
     ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+  });
+
+  it("prefers working over auto waiting at the project level", () => {
+    expect(
+      resolveProjectStatusIndicator([
+        {
+          label: "Auto Waiting",
+          colorClass: "text-amber-600",
+          dotClass: "bg-amber-500",
+          pulse: false,
+        },
+        {
+          label: "Working",
+          colorClass: "text-sky-600",
+          dotClass: "bg-sky-500",
+          pulse: true,
+        },
+      ]),
+    ).toMatchObject({ label: "Working", dotClass: "bg-sky-500" });
   });
 });
 
