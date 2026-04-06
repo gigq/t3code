@@ -6,8 +6,10 @@ import { OpenError, OpenInEditorInput } from "./editor";
 import {
   GitActionProgressEvent,
   GitCheckoutInput,
+  GitCheckoutResult,
   GitCommandError,
   GitCreateBranchInput,
+  GitCreateBranchResult,
   GitCreateWorktreeInput,
   GitCreateWorktreeResult,
   GitInitInput,
@@ -26,6 +28,7 @@ import {
   GitRunStackedActionInput,
   GitStatusInput,
   GitStatusResult,
+  GitStatusStreamEvent,
 } from "./git";
 import { KeybindingsConfigError } from "./keybindings";
 import {
@@ -98,8 +101,8 @@ export const WS_METHODS = {
 
   // Git methods
   gitPull: "git.pull",
-  gitStatus: "git.status",
   gitReadWorkingTreeDiff: "git.readWorkingTreeDiff",
+  gitRefreshStatus: "git.refreshStatus",
   gitRunStackedAction: "git.runStackedAction",
   gitListBranches: "git.listBranches",
   gitCreateWorktree: "git.createWorktree",
@@ -132,6 +135,7 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
 
   // Streaming subscriptions
+  subscribeGitStatus: "subscribeGitStatus",
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
@@ -195,10 +199,11 @@ export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
   error: OpenError,
 });
 
-export const WsGitStatusRpc = Rpc.make(WS_METHODS.gitStatus, {
+export const WsSubscribeGitStatusRpc = Rpc.make(WS_METHODS.subscribeGitStatus, {
   payload: GitStatusInput,
-  success: GitStatusResult,
+  success: GitStatusStreamEvent,
   error: GitManagerServiceError,
+  stream: true,
 });
 
 export const WsGitReadWorkingTreeDiffRpc = Rpc.make(WS_METHODS.gitReadWorkingTreeDiff, {
@@ -211,6 +216,12 @@ export const WsGitPullRpc = Rpc.make(WS_METHODS.gitPull, {
   payload: GitPullInput,
   success: GitPullResult,
   error: GitCommandError,
+});
+
+export const WsGitRefreshStatusRpc = Rpc.make(WS_METHODS.gitRefreshStatus, {
+  payload: GitStatusInput,
+  success: GitStatusResult,
+  error: GitManagerServiceError,
 });
 
 export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
@@ -251,11 +262,13 @@ export const WsGitRemoveWorktreeRpc = Rpc.make(WS_METHODS.gitRemoveWorktree, {
 
 export const WsGitCreateBranchRpc = Rpc.make(WS_METHODS.gitCreateBranch, {
   payload: GitCreateBranchInput,
+  success: GitCreateBranchResult,
   error: GitCommandError,
 });
 
 export const WsGitCheckoutRpc = Rpc.make(WS_METHODS.gitCheckout, {
   payload: GitCheckoutInput,
+  success: GitCheckoutResult,
   error: GitCommandError,
 });
 
@@ -405,9 +418,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
-  WsGitStatusRpc,
   WsGitReadWorkingTreeDiffRpc,
+  WsSubscribeGitStatusRpc,
   WsGitPullRpc,
+  WsGitRefreshStatusRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,

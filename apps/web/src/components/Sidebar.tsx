@@ -48,7 +48,6 @@ import {
   ThreadId,
   type GitStatusResult,
 } from "@t3tools/contracts";
-import { useQueries } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
   type SidebarProjectSortOrder,
@@ -69,7 +68,7 @@ import {
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
-import { gitStatusQueryOptions } from "../lib/gitReactQuery";
+import { useGitStatus } from "../lib/gitStatusState";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -250,8 +249,20 @@ function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
   return null;
 }
 
+function resolveThreadPr(
+  threadBranch: string | null,
+  gitStatus: GitStatusResult | null,
+): ThreadPr | null {
+  if (threadBranch === null || gitStatus === null || gitStatus.branch !== threadBranch) {
+    return null;
+  }
+
+  return gitStatus.pr ?? null;
+}
+
 interface SidebarThreadRowProps {
   threadId: ThreadId;
+  projectCwd: string | null;
   orderedProjectThreadIds: readonly ThreadId[];
   routeThreadId: ThreadId | null;
   selectedThreadIds: ReadonlySet<ThreadId>;
@@ -282,7 +293,6 @@ interface SidebarThreadRowProps {
   cancelRename: () => void;
   attemptArchiveThread: (threadId: ThreadId) => Promise<void>;
   openPrLink: (event: MouseEvent<HTMLElement>, prUrl: string) => void;
-  pr: ThreadPr | null;
 }
 
 function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -292,6 +302,8 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
     (state) =>
       selectThreadTerminalState(state.terminalStateByThreadId, props.threadId).runningTerminalIds,
   );
+  const gitCwd = thread?.worktreePath ?? props.projectCwd;
+  const gitStatus = useGitStatus(thread?.branch != null ? gitCwd : null);
 
   if (!thread) {
     return null;
@@ -308,7 +320,8 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
       lastVisitedAt,
     },
   });
-  const prStatus = prStatusIndicator(props.pr);
+  const pr = resolveThreadPr(thread.branch, gitStatus.data);
+  const prStatus = prStatusIndicator(pr);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = props.confirmingArchiveThreadId === thread.id && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
@@ -765,33 +778,6 @@ export default function Sidebar() {
     }),
     [platform, routeTerminalOpen],
   );
-  const threadGitTargets = useMemo(
-    () =>
-      sidebarThreads.map((thread) => ({
-        threadId: thread.id,
-        branch: thread.branch,
-        cwd: thread.worktreePath ?? projectCwdById.get(thread.projectId) ?? null,
-      })),
-    [projectCwdById, sidebarThreads],
-  );
-  const threadGitStatusCwds = useMemo(
-    () => [
-      ...new Set(
-        threadGitTargets
-          .filter((target) => target.branch !== null)
-          .map((target) => target.cwd)
-          .filter((cwd): cwd is string => cwd !== null),
-      ),
-    ],
-    [threadGitTargets],
-  );
-  const threadGitStatusQueries = useQueries({
-    queries: threadGitStatusCwds.map((cwd) => ({
-      ...gitStatusQueryOptions(cwd),
-      staleTime: 30_000,
-      refetchInterval: 60_000,
-    })),
-  });
   const importDialogProject =
     importDialogProjectId !== null
       ? (projects.find((project) => project.id === importDialogProjectId) ?? null)
@@ -800,27 +786,6 @@ export default function Sidebar() {
     () => deriveLatestContextWindowSnapshot(activeThread?.activities ?? []),
     [activeThread?.activities],
   );
-  const prByThreadId = useMemo(() => {
-    const statusByCwd = new Map<string, GitStatusResult>();
-    for (let index = 0; index < threadGitStatusCwds.length; index += 1) {
-      const cwd = threadGitStatusCwds[index];
-      if (!cwd) continue;
-      const status = threadGitStatusQueries[index]?.data;
-      if (status) {
-        statusByCwd.set(cwd, status);
-      }
-    }
-
-    const map = new Map<ThreadId, ThreadPr>();
-    for (const target of threadGitTargets) {
-      const status = target.cwd ? statusByCwd.get(target.cwd) : undefined;
-      const branchMatches =
-        target.branch !== null && status?.branch !== null && status?.branch === target.branch;
-      map.set(target.threadId, branchMatches ? (status?.pr ?? null) : null);
-    }
-    return map;
-  }, [threadGitStatusCwds, threadGitStatusQueries, threadGitTargets]);
-
   const openPrLink = useCallback((event: MouseEvent<HTMLElement>, prUrl: string) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1717,6 +1682,7 @@ export default function Sidebar() {
               <SidebarThreadRow
                 key={threadId}
                 threadId={threadId}
+                projectCwd={project.cwd}
                 orderedProjectThreadIds={orderedProjectThreadIds}
                 routeThreadId={routeThreadId}
                 selectedThreadIds={selectedThreadIds}
@@ -1740,7 +1706,6 @@ export default function Sidebar() {
                 cancelRename={cancelRename}
                 attemptArchiveThread={attemptArchiveThread}
                 openPrLink={openPrLink}
-                pr={prByThreadId.get(threadId) ?? null}
               />
             ))}
 
