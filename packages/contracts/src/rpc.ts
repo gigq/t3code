@@ -35,6 +35,7 @@ import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
   OrchestrationGetSnapshotInput,
+  OrchestrationImportCodexThreadInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsError,
@@ -42,6 +43,8 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration";
 import {
+  ProjectBrowseDirectoriesInput,
+  ProjectBrowseDirectoriesResult,
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -49,6 +52,11 @@ import {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
+import {
+  RemoveWebPushSubscriptionInput,
+  WebPushConfig,
+  WebPushSubscription,
+} from "./notifications";
 import {
   TerminalClearInput,
   TerminalCloseInput,
@@ -63,6 +71,7 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerCodexUsage,
   ServerLifecycleStreamEvent,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
@@ -75,6 +84,7 @@ export const WS_METHODS = {
   projectsList: "projects.list",
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
+  projectsBrowseDirectories: "projects.browseDirectories",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
 
@@ -102,8 +112,14 @@ export const WS_METHODS = {
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
 
+  // Notifications
+  notificationsGetWebPushConfig: "notifications.getWebPushConfig",
+  notificationsUpsertWebPushSubscription: "notifications.upsertWebPushSubscription",
+  notificationsRemoveWebPushSubscription: "notifications.removeWebPushSubscription",
+
   // Server meta
   serverGetConfig: "server.getConfig",
+  serverGetCodexUsage: "server.getCodexUsage",
   serverRefreshProviders: "server.refreshProviders",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
@@ -128,6 +144,11 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError]),
 });
 
+export const WsServerGetCodexUsageRpc = Rpc.make(WS_METHODS.serverGetCodexUsage, {
+  payload: Schema.Struct({}),
+  success: ServerCodexUsage,
+});
+
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
   payload: Schema.Struct({}),
   success: ServerProviderUpdatedPayload,
@@ -149,6 +170,11 @@ export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntr
   payload: ProjectSearchEntriesInput,
   success: ProjectSearchEntriesResult,
   error: ProjectSearchEntriesError,
+});
+
+export const WsProjectsBrowseDirectoriesRpc = Rpc.make(WS_METHODS.projectsBrowseDirectories, {
+  payload: ProjectBrowseDirectoriesInput,
+  success: ProjectBrowseDirectoriesResult,
 });
 
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
@@ -257,6 +283,28 @@ export const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: TerminalError,
 });
 
+export const WsNotificationsGetWebPushConfigRpc = Rpc.make(
+  WS_METHODS.notificationsGetWebPushConfig,
+  {
+    payload: Schema.Struct({}),
+    success: WebPushConfig,
+  },
+);
+
+export const WsNotificationsUpsertWebPushSubscriptionRpc = Rpc.make(
+  WS_METHODS.notificationsUpsertWebPushSubscription,
+  {
+    payload: WebPushSubscription,
+  },
+);
+
+export const WsNotificationsRemoveWebPushSubscriptionRpc = Rpc.make(
+  WS_METHODS.notificationsRemoveWebPushSubscription,
+  {
+    payload: RemoveWebPushSubscriptionInput,
+  },
+);
+
 export const WsOrchestrationGetSnapshotRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getSnapshot, {
   payload: OrchestrationGetSnapshotInput,
   success: OrchestrationRpcSchemas.getSnapshot.output,
@@ -269,6 +317,14 @@ export const WsOrchestrationDispatchCommandRpc = Rpc.make(
     payload: ClientOrchestrationCommand,
     success: OrchestrationRpcSchemas.dispatchCommand.output,
     error: OrchestrationDispatchCommandError,
+  },
+);
+
+export const WsOrchestrationImportCodexThreadRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.importCodexThread,
+  {
+    payload: OrchestrationImportCodexThreadInput,
+    success: OrchestrationRpcSchemas.importCodexThread.output,
   },
 );
 
@@ -323,10 +379,12 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
 
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
+  WsServerGetCodexUsageRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsProjectsBrowseDirectoriesRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
@@ -347,12 +405,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsNotificationsGetWebPushConfigRpc,
+  WsNotificationsUpsertWebPushSubscriptionRpc,
+  WsNotificationsRemoveWebPushSubscriptionRpc,
   WsSubscribeOrchestrationDomainEventsRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
+  WsOrchestrationImportCodexThreadRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,

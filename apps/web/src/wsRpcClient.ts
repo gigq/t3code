@@ -47,6 +47,7 @@ export interface WsRpcClient {
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
   };
   readonly projects: {
+    readonly browseDirectories: RpcUnaryMethod<typeof WS_METHODS.projectsBrowseDirectories>;
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
   };
@@ -74,8 +75,18 @@ export interface WsRpcClient {
       typeof WS_METHODS.gitPreparePullRequestThread
     >;
   };
+  readonly notifications: {
+    readonly getWebPushConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.notificationsGetWebPushConfig>;
+    readonly upsertWebPushSubscription: RpcUnaryMethod<
+      typeof WS_METHODS.notificationsUpsertWebPushSubscription
+    >;
+    readonly removeWebPushSubscription: RpcUnaryMethod<
+      typeof WS_METHODS.notificationsRemoveWebPushSubscription
+    >;
+  };
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
+    readonly getCodexUsage: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetCodexUsage>;
     readonly refreshProviders: RpcUnaryNoArgMethod<typeof WS_METHODS.serverRefreshProviders>;
     readonly upsertKeybinding: RpcUnaryMethod<typeof WS_METHODS.serverUpsertKeybinding>;
     readonly getSettings: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetSettings>;
@@ -88,6 +99,7 @@ export interface WsRpcClient {
   readonly orchestration: {
     readonly getSnapshot: RpcUnaryNoArgMethod<typeof ORCHESTRATION_WS_METHODS.getSnapshot>;
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
+    readonly importCodexThread: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.importCodexThread>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
@@ -124,6 +136,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.subscribe((client) => client[WS_METHODS.subscribeTerminalEvents]({}), listener),
     },
     projects: {
+      browseDirectories: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsBrowseDirectories](input)),
       searchEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
       writeFile: (input) =>
@@ -132,6 +146,14 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
     shell: {
       openInEditor: (input) =>
         transport.request((client) => client[WS_METHODS.shellOpenInEditor](input)),
+    },
+    notifications: {
+      getWebPushConfig: () =>
+        transport.request((client) => client[WS_METHODS.notificationsGetWebPushConfig]({})),
+      upsertWebPushSubscription: (input) =>
+        transport.request((client) => client[WS_METHODS.notificationsUpsertWebPushSubscription](input)),
+      removeWebPushSubscription: (input) =>
+        transport.request((client) => client[WS_METHODS.notificationsRemoveWebPushSubscription](input)),
     },
     git: {
       pull: (input) => transport.request((client) => client[WS_METHODS.gitPull](input)),
@@ -172,6 +194,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
     },
     server: {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),
+      getCodexUsage: () =>
+        transport.request((client) => client[WS_METHODS.serverGetCodexUsage]({})),
       refreshProviders: () =>
         transport.request((client) => client[WS_METHODS.serverRefreshProviders]({})),
       upsertKeybinding: (input) =>
@@ -189,6 +213,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})),
       dispatchCommand: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
+      importCodexThread: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.importCodexThread](input)),
       getTurnDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>

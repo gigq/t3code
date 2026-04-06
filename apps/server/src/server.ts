@@ -42,6 +42,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
+import { WebPushServiceLive } from "./notifications/Layers/WebPushService";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -181,6 +182,7 @@ const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
+  Layer.provideMerge(WebPushServiceLive),
 
   // Misc.
   Layer.provideMerge(AnalyticsServiceLayerLive),

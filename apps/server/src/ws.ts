@@ -1,5 +1,10 @@
-import { Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import fs from "node:fs/promises";
+
+import { Effect, Layer, Option, Path, Queue, Ref, Schema, Stream } from "effect";
 import {
+  CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   type GitActionProgressEvent,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
@@ -8,27 +13,39 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectId,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   type TerminalEvent,
+  ThreadId,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import { extractCodexThreadId } from "@t3tools/shared/codex";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
+import { getCodexUsage } from "./codexUsage";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore";
 import { GitManager } from "./git/Services/GitManager";
 import { Keybindings } from "./keybindings";
 import { Open, resolveAvailableEditors } from "./open";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer";
+import {
+  buildImportedOrchestrationMessages,
+  buildImportedThreadTitle,
+} from "./orchestration/importCodexThread";
+import { toOrchestrationSession } from "./orchestration/providerSession";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { expandHomePath } from "./os-jank";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
+import { ProviderService } from "./provider/Services/ProviderService";
+import { WebPushService } from "./notifications/Services/WebPushService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -48,12 +65,186 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const git = yield* GitCore;
     const terminalManager = yield* TerminalManager;
     const providerRegistry = yield* ProviderRegistry;
+    const providerService = yield* ProviderService;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
+    const webPushService = yield* WebPushService;
+    const path = yield* Path.Path;
+
+    const importCodexThread = Effect.fn(function* (input: {
+      readonly projectId: ProjectId;
+      readonly providerThreadId: string;
+      readonly title?: string;
+    }) {
+      const normalizedProviderThreadId = extractCodexThreadId(input.providerThreadId);
+      if (!normalizedProviderThreadId) {
+        return yield* Effect.fail(new Error("Enter a valid Codex session or thread ID."));
+      }
+
+      const readModel = yield* projectionSnapshotQuery.getSnapshot();
+      const project = readModel.projects.find(
+        (entry) => entry.id === input.projectId && entry.deletedAt === null,
+      );
+      if (!project) {
+        return yield* Effect.fail(new Error(`Project '${input.projectId}' was not found.`));
+      }
+
+      const createdAt = new Date().toISOString();
+      const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
+      const modelSelection =
+        project.defaultModelSelection?.provider === "codex"
+          ? project.defaultModelSelection
+          : {
+              provider: "codex" as const,
+              model: DEFAULT_MODEL_BY_PROVIDER.codex,
+            };
+      const initialTitle = input.title?.trim() || "Imported Codex thread";
+
+      yield* orchestrationEngine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+        threadId,
+        projectId: project.id,
+        title: initialTitle,
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+
+      const cleanupImportedThread = () =>
+        Effect.gen(function* () {
+          yield* providerService.stopSession({ threadId }).pipe(Effect.catch(() => Effect.void));
+          yield* orchestrationEngine
+            .dispatch({
+              type: "thread.delete",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+            })
+            .pipe(Effect.catch(() => Effect.void));
+        });
+
+      return yield* Effect.gen(function* () {
+        const session = yield* providerService.startSession(threadId, {
+          threadId,
+          provider: "codex",
+          cwd: project.workspaceRoot,
+          modelSelection,
+          resumeCursor: {
+            threadId: normalizedProviderThreadId,
+          },
+          runtimeMode: "full-access",
+        });
+        const snapshot = yield* providerService.readThread(threadId);
+        const importedMessages = buildImportedOrchestrationMessages({
+          threadId,
+          snapshot,
+          importedAt: createdAt,
+        });
+        const resolvedTitle = input.title?.trim()
+          ? input.title.trim()
+          : buildImportedThreadTitle(importedMessages, initialTitle);
+
+        if (resolvedTitle !== initialTitle) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+            threadId,
+            title: resolvedTitle,
+          });
+        }
+
+        yield* Effect.forEach(importedMessages, (message) =>
+          orchestrationEngine.dispatch({
+            type: "thread.message.import",
+            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+            threadId,
+            message: {
+              messageId: message.messageId,
+              role: message.role,
+              text: message.text,
+              turnId: message.turnId,
+            },
+            createdAt: message.createdAt,
+          }),
+        );
+
+        yield* orchestrationEngine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+          threadId,
+          session: toOrchestrationSession({ threadId, session }),
+          createdAt,
+        });
+
+        return { threadId };
+      }).pipe(Effect.tapError(() => cleanupImportedThread()));
+    });
+
+    const browseProjectDirectories = Effect.fn(function* (input: { readonly path?: string }) {
+      const requestedPath =
+        input.path !== undefined && input.path.trim().length > 0 ? input.path.trim() : config.cwd;
+      const currentPath = path.resolve(yield* expandHomePath(requestedPath));
+      const stat = yield* Effect.tryPromise({
+        try: () => fs.stat(currentPath),
+        catch: (cause) => new Error(`Directory does not exist: ${currentPath}: ${String(cause)}`),
+      });
+      if (!stat.isDirectory()) {
+        return yield* Effect.fail(new Error(`Path is not a directory: ${currentPath}`));
+      }
+      const directoryEntries = yield* Effect.tryPromise({
+        try: () => fs.readdir(currentPath, { withFileTypes: true }),
+        catch: (cause) => new Error(`Failed to read directory: ${String(cause)}`),
+      });
+
+      const entries = directoryEntries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({
+          name: entry.name,
+          path: path.join(currentPath, entry.name),
+        }))
+        .toSorted((left, right) => {
+          const leftHidden = left.name.startsWith(".");
+          const rightHidden = right.name.startsWith(".");
+          if (leftHidden !== rightHidden) {
+            return leftHidden ? 1 : -1;
+          }
+          return left.name.localeCompare(right.name, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+        });
+
+      const homePath = path.resolve(yield* expandHomePath("~"));
+      const currentRoot = path.parse(currentPath).root || "/";
+      const roots = Array.from(
+        new Map(
+          [
+            ["Current", path.resolve(config.cwd)],
+            ["Home", homePath],
+            ["Root", currentRoot],
+          ].map(([label, absolutePath]) => [absolutePath, { label, path: absolutePath }] as const),
+        ).values(),
+      );
+
+      const parentPath = (() => {
+        const nextParentPath = path.dirname(currentPath);
+        return nextParentPath === currentPath ? undefined : nextParentPath;
+      })();
+
+      return {
+        currentPath,
+        ...(parentPath ? { parentPath } : {}),
+        roots,
+        entries,
+      };
+    });
 
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
@@ -189,6 +380,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           }),
         ),
       [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig,
+      [WS_METHODS.serverGetCodexUsage]: (_input) => Effect.promise(() => getCodexUsage()),
       [WS_METHODS.serverRefreshProviders]: (_input) =>
         providerRegistry.refresh().pipe(Effect.map((providers) => ({ providers }))),
       [WS_METHODS.serverUpsertKeybinding]: (rule) =>
@@ -198,6 +390,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         }),
       [WS_METHODS.serverGetSettings]: (_input) => serverSettings.getSettings,
       [WS_METHODS.serverUpdateSettings]: ({ patch }) => serverSettings.updateSettings(patch),
+      [WS_METHODS.projectsBrowseDirectories]: (input) => browseProjectDirectories(input),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         workspaceEntries.search(input).pipe(
           Effect.mapError(
@@ -254,6 +447,11 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.terminalClear]: (input) => terminalManager.clear(input),
       [WS_METHODS.terminalRestart]: (input) => terminalManager.restart(input),
       [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
+      [WS_METHODS.notificationsGetWebPushConfig]: (_input) => webPushService.getWebPushConfig,
+      [WS_METHODS.notificationsUpsertWebPushSubscription]: (input) =>
+        webPushService.upsertWebPushSubscription(input),
+      [WS_METHODS.notificationsRemoveWebPushSubscription]: (input) =>
+        webPushService.removeWebPushSubscription(input),
       [WS_METHODS.subscribeTerminalEvents]: (_input) =>
         Stream.callback<TerminalEvent>((queue) =>
           Effect.acquireRelease(
@@ -311,6 +509,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             return Stream.concat(Stream.fromIterable(snapshotEvents), liveEvents);
           }),
         ),
+      [ORCHESTRATION_WS_METHODS.importCodexThread]: (input) => importCodexThread(input),
     });
   }),
 );
