@@ -105,7 +105,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleAlertIcon,
-  Clock3Icon,
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
@@ -203,11 +202,7 @@ import {
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
-import {
-  useServerAvailableEditors,
-  useServerConfig,
-  useServerKeybindings,
-} from "~/rpc/serverState";
+import { useServerConfig, useServerKeybindings } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
@@ -1512,7 +1507,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
   const gitStatusQuery = useQuery(gitStatusQueryOptions(gitCwd));
   const keybindings = useServerKeybindings();
-  const availableEditors = useServerAvailableEditors();
   const modelOptionsByProvider = useMemo(
     () => ({
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
@@ -2750,11 +2744,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       window.clearInterval(timer);
     };
   }, [phase]);
-
-  const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
-    setSendStartedAt((current) => current ?? new Date().toISOString());
-    setSendPhase(nextPhase);
-  }, []);
 
   const resetSendPhase = useCallback(() => {
     setSendPhase("idle");

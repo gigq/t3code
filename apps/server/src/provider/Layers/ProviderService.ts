@@ -581,11 +581,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         const stoppedAt = new Date().toISOString();
         const activeSession = routed.isActive
-          ? yield* routed.adapter.listSessions().pipe(
-              Effect.map((sessions) =>
-                sessions.find((session) => session.threadId === input.threadId),
-              ),
-            )
+          ? yield* routed.adapter
+              .listSessions()
+              .pipe(
+                Effect.map((sessions) =>
+                  sessions.find((session) => session.threadId === input.threadId),
+                ),
+              )
           : undefined;
         if (activeSession) {
           yield* upsertSessionBinding(activeSession, input.threadId, {
@@ -629,20 +631,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
-  const readThread: ProviderServiceShape["readThread"] = Effect.fn("readThread")(function* (
-    threadId,
-  ) {
-    const routed = yield* resolveRoutableSession({
-      threadId,
-      operation: "ProviderService.readThread",
-      allowRecovery: true,
-    });
-    const snapshot = yield* routed.adapter.readThread(routed.threadId);
-    yield* analytics.record("provider.thread.read", {
-      provider: routed.adapter.provider,
-    });
-    return snapshot;
-  });
+  const readThread: ProviderServiceShape["readThread"] = Effect.fn("readThread")(
+    function* (threadId) {
+      const routed = yield* resolveRoutableSession({
+        threadId,
+        operation: "ProviderService.readThread",
+        allowRecovery: true,
+      });
+      const snapshot = yield* routed.adapter.readThread(routed.threadId);
+      yield* analytics.record("provider.thread.read", {
+        provider: routed.adapter.provider,
+      });
+      return snapshot;
+    },
+  );
 
   const listSessions: ProviderServiceShape["listSessions"] = Effect.fn("listSessions")(
     function* () {

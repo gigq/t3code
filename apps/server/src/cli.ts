@@ -324,6 +324,8 @@ export const resolveServerConfig = (
       ...derivedPaths,
       serverTracePath,
       host,
+      tls: undefined,
+      webPushVapidSubject: undefined,
       staticDir,
       devUrl,
       noBrowser,

@@ -24,6 +24,11 @@ export const WebPushConfig = Schema.Struct({
 });
 export type WebPushConfig = typeof WebPushConfig.Type;
 
+export class WebPushRpcError extends Schema.TaggedErrorClass<WebPushRpcError>()("WebPushRpcError", {
+  message: TrimmedNonEmptyString,
+  cause: Schema.optional(Schema.Defect),
+}) {}
+
 export const ThreadCompletionNotificationPayload = Schema.Struct({
   threadId: ThreadId,
   title: TrimmedNonEmptyString,

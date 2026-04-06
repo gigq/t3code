@@ -51,6 +51,14 @@ export const ProjectBrowseDirectoriesResult = Schema.Struct({
 });
 export type ProjectBrowseDirectoriesResult = typeof ProjectBrowseDirectoriesResult.Type;
 
+export class ProjectBrowseDirectoriesError extends Schema.TaggedErrorClass<ProjectBrowseDirectoriesError>()(
+  "ProjectBrowseDirectoriesError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
 export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSearchEntriesError>()(
   "ProjectSearchEntriesError",
   {

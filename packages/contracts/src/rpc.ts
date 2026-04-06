@@ -35,6 +35,7 @@ import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
   OrchestrationGetSnapshotInput,
+  OrchestrationImportCodexThreadError,
   OrchestrationImportCodexThreadInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
@@ -43,6 +44,7 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration";
 import {
+  ProjectBrowseDirectoriesError,
   ProjectBrowseDirectoriesInput,
   ProjectBrowseDirectoriesResult,
   ProjectSearchEntriesError,
@@ -55,6 +57,7 @@ import {
 import {
   RemoveWebPushSubscriptionInput,
   WebPushConfig,
+  WebPushRpcError,
   WebPushSubscription,
 } from "./notifications";
 import {
@@ -175,6 +178,7 @@ export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntr
 export const WsProjectsBrowseDirectoriesRpc = Rpc.make(WS_METHODS.projectsBrowseDirectories, {
   payload: ProjectBrowseDirectoriesInput,
   success: ProjectBrowseDirectoriesResult,
+  error: ProjectBrowseDirectoriesError,
 });
 
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
@@ -288,6 +292,7 @@ export const WsNotificationsGetWebPushConfigRpc = Rpc.make(
   {
     payload: Schema.Struct({}),
     success: WebPushConfig,
+    error: WebPushRpcError,
   },
 );
 
@@ -295,6 +300,7 @@ export const WsNotificationsUpsertWebPushSubscriptionRpc = Rpc.make(
   WS_METHODS.notificationsUpsertWebPushSubscription,
   {
     payload: WebPushSubscription,
+    error: WebPushRpcError,
   },
 );
 
@@ -302,6 +308,7 @@ export const WsNotificationsRemoveWebPushSubscriptionRpc = Rpc.make(
   WS_METHODS.notificationsRemoveWebPushSubscription,
   {
     payload: RemoveWebPushSubscriptionInput,
+    error: WebPushRpcError,
   },
 );
 
@@ -325,6 +332,7 @@ export const WsOrchestrationImportCodexThreadRpc = Rpc.make(
   {
     payload: OrchestrationImportCodexThreadInput,
     success: OrchestrationRpcSchemas.importCodexThread.output,
+    error: OrchestrationImportCodexThreadError,
   },
 );
 

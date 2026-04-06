@@ -60,6 +60,11 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService.ts";
+import {
+  WebPushService,
+  type WebPushServiceShape,
+} from "./notifications/Services/WebPushService.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -111,6 +116,7 @@ const makeDefaultOrchestrationReadModel = () => {
         runtimeMode: "full-access" as const,
         branch: null,
         worktreePath: null,
+        autoDeferUntil: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
@@ -248,7 +254,9 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
+    providerService?: Partial<ProviderServiceShape>;
     serverSettings?: Partial<ServerSettingsShape>;
+    webPushService?: Partial<WebPushServiceShape>;
     open?: Partial<OpenShape>;
     gitCore?: Partial<GitCoreShape>;
     gitManager?: Partial<GitManagerShape>;
@@ -282,6 +290,8 @@ const buildAppUnderTest = (options?: {
       mode: "web",
       port: 0,
       host: "127.0.0.1",
+      tls: undefined,
+      webPushVapidSubject: undefined,
       cwd: process.cwd(),
       baseDir,
       ...derivedPaths,
@@ -314,6 +324,22 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
+        Layer.mock(ProviderService)({
+          startSession: () => Effect.die("Unexpected ProviderService.startSession in test"),
+          sendTurn: () => Effect.die("Unexpected ProviderService.sendTurn in test"),
+          interruptTurn: () => Effect.void,
+          respondToRequest: () => Effect.void,
+          respondToUserInput: () => Effect.void,
+          stopSession: () => Effect.void,
+          readThread: () => Effect.die("Unexpected ProviderService.readThread in test"),
+          listSessions: () => Effect.succeed([]),
+          getCapabilities: () => Effect.die("Unexpected ProviderService.getCapabilities in test"),
+          rollbackConversation: () => Effect.void,
+          streamEvents: Stream.empty,
+          ...options?.layers?.providerService,
+        }),
+      ),
+      Layer.provide(
         Layer.mock(ServerSettingsService)({
           start: Effect.void,
           ready: Effect.void,
@@ -326,6 +352,16 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(Open)({
           ...options?.layers?.open,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(WebPushService)({
+          start: Effect.void,
+          getWebPushConfig: Effect.succeed({ vapidPublicKey: "test-vapid-public-key" }),
+          upsertWebPushSubscription: () => Effect.void,
+          removeWebPushSubscription: () => Effect.void,
+          sendThreadCompletionNotification: () => Effect.void,
+          ...options?.layers?.webPushService,
         }),
       ),
       Layer.provide(
@@ -1541,6 +1577,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             runtimeMode: "full-access" as const,
             branch: null,
             worktreePath: null,
+            autoDeferUntil: null,
             createdAt: now,
             updatedAt: now,
             archivedAt: null,

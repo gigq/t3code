@@ -710,9 +710,7 @@ export default function Sidebar() {
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
-  const [confirmingArchiveThreadId, setConfirmingArchiveThreadId] = useState<ThreadId | null>(
-    null,
-  );
+  const [confirmingArchiveThreadId, setConfirmingArchiveThreadId] = useState<ThreadId | null>(null);
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
@@ -734,7 +732,6 @@ export default function Sidebar() {
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
-  const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,

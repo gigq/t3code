@@ -1119,6 +1119,14 @@ export const OrchestrationImportCodexThreadResult = Schema.Struct({
 });
 export type OrchestrationImportCodexThreadResult = typeof OrchestrationImportCodexThreadResult.Type;
 
+export class OrchestrationImportCodexThreadError extends Schema.TaggedErrorClass<OrchestrationImportCodexThreadError>()(
+  "OrchestrationImportCodexThreadError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
 export const OrchestrationRpcSchemas = {
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,

@@ -14,13 +14,16 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
+  OrchestrationImportCodexThreadError,
   ORCHESTRATION_WS_METHODS,
+  ProjectBrowseDirectoriesError,
   ProjectId,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   ThreadId,
   type TerminalEvent,
+  WebPushRpcError,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -87,129 +90,161 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const importCodexThread = Effect.fn(function* (input: {
       readonly projectId: ProjectId;
       readonly providerThreadId: string;
-      readonly title?: string;
+      readonly title?: string | undefined;
     }) {
-      const normalizedProviderThreadId = extractCodexThreadId(input.providerThreadId);
-      if (!normalizedProviderThreadId) {
-        return yield* Effect.fail(new Error("Enter a valid Codex session or thread ID."));
-      }
-
-      const readModel = yield* projectionSnapshotQuery.getSnapshot();
-      const project = readModel.projects.find(
-        (entry) => entry.id === input.projectId && entry.deletedAt === null,
-      );
-      if (!project) {
-        return yield* Effect.fail(new Error(`Project '${input.projectId}' was not found.`));
-      }
-
-      const createdAt = new Date().toISOString();
-      const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
-      const modelSelection =
-        project.defaultModelSelection?.provider === "codex"
-          ? project.defaultModelSelection
-          : {
-              provider: "codex" as const,
-              model: DEFAULT_MODEL_BY_PROVIDER.codex,
-            };
-      const initialTitle = input.title?.trim() || "Imported Codex thread";
-
-      yield* orchestrationEngine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-        threadId,
-        projectId: project.id,
-        title: initialTitle,
-        modelSelection,
-        runtimeMode: "full-access",
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      });
-
-      const cleanupImportedThread = () =>
-        Effect.gen(function* () {
-          yield* providerService.stopSession({ threadId }).pipe(Effect.catch(() => Effect.void));
-          yield* orchestrationEngine
-            .dispatch({
-              type: "thread.delete",
-              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-              threadId,
-            })
-            .pipe(Effect.catch(() => Effect.void));
-        });
-
       return yield* Effect.gen(function* () {
-        const session = yield* providerService.startSession(threadId, {
-          threadId,
-          provider: "codex",
-          cwd: project.workspaceRoot,
-          modelSelection,
-          resumeCursor: {
-            threadId: normalizedProviderThreadId,
-          },
-          runtimeMode: "full-access",
-        });
-        const snapshot = yield* providerService.readThread(threadId);
-        const importedMessages = buildImportedOrchestrationMessages({
-          threadId,
-          snapshot,
-          importedAt: createdAt,
-        });
-        const resolvedTitle = input.title?.trim()
-          ? input.title.trim()
-          : buildImportedThreadTitle(importedMessages, initialTitle);
-
-        if (resolvedTitle !== initialTitle) {
-          yield* orchestrationEngine.dispatch({
-            type: "thread.meta.update",
-            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-            threadId,
-            title: resolvedTitle,
-          });
+        const normalizedProviderThreadId = extractCodexThreadId(input.providerThreadId);
+        if (!normalizedProviderThreadId) {
+          return yield* Effect.fail(new Error("Enter a valid Codex session or thread ID."));
         }
 
-        yield* Effect.forEach(importedMessages, (message) =>
-          orchestrationEngine.dispatch({
-            type: "thread.message.import",
-            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-            threadId,
-            message: {
-              messageId: message.messageId,
-              role: message.role,
-              text: message.text,
-              turnId: message.turnId,
-            },
-            createdAt: message.createdAt,
-          }),
+        const readModel = yield* projectionSnapshotQuery.getSnapshot();
+        const project = readModel.projects.find(
+          (entry) => entry.id === input.projectId && entry.deletedAt === null,
         );
+        if (!project) {
+          return yield* Effect.fail(new Error(`Project '${input.projectId}' was not found.`));
+        }
+
+        const createdAt = new Date().toISOString();
+        const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
+        const modelSelection =
+          project.defaultModelSelection?.provider === "codex"
+            ? project.defaultModelSelection
+            : {
+                provider: "codex" as const,
+                model: DEFAULT_MODEL_BY_PROVIDER.codex,
+              };
+        const initialTitle = input.title?.trim() || "Imported Codex thread";
 
         yield* orchestrationEngine.dispatch({
-          type: "thread.session.set",
+          type: "thread.create",
           commandId: CommandId.makeUnsafe(crypto.randomUUID()),
           threadId,
-          session: toOrchestrationSession({ threadId, session }),
+          projectId: project.id,
+          title: initialTitle,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
           createdAt,
         });
 
-        return { threadId };
-      }).pipe(Effect.tapError(() => cleanupImportedThread()));
+        const cleanupImportedThread = () =>
+          Effect.gen(function* () {
+            yield* providerService.stopSession({ threadId }).pipe(Effect.catch(() => Effect.void));
+            yield* orchestrationEngine
+              .dispatch({
+                type: "thread.delete",
+                commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+                threadId,
+              })
+              .pipe(Effect.catch(() => Effect.void));
+          });
+
+        return yield* Effect.gen(function* () {
+          const session = yield* providerService.startSession(threadId, {
+            threadId,
+            provider: "codex",
+            cwd: project.workspaceRoot,
+            modelSelection,
+            resumeCursor: {
+              threadId: normalizedProviderThreadId,
+            },
+            runtimeMode: "full-access",
+          });
+          const snapshot = yield* providerService.readThread(threadId);
+          const importedMessages = buildImportedOrchestrationMessages({
+            threadId,
+            snapshot,
+            importedAt: createdAt,
+          });
+          const resolvedTitle = input.title?.trim()
+            ? input.title.trim()
+            : buildImportedThreadTitle(importedMessages, initialTitle);
+
+          if (resolvedTitle !== initialTitle) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.meta.update",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+              title: resolvedTitle,
+            });
+          }
+
+          yield* Effect.forEach(importedMessages, (message) =>
+            orchestrationEngine.dispatch({
+              type: "thread.message.import",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+              message: {
+                messageId: message.messageId,
+                role: message.role,
+                text: message.text,
+                turnId: message.turnId,
+              },
+              createdAt: message.createdAt,
+            }),
+          );
+
+          yield* orchestrationEngine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+            threadId,
+            session: toOrchestrationSession({ threadId, session }),
+            createdAt,
+          });
+
+          return { threadId };
+        }).pipe(Effect.tapError(() => cleanupImportedThread()));
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationImportCodexThreadError({
+              message: cause instanceof Error ? cause.message : "Failed to import Codex thread.",
+              cause,
+            }),
+        ),
+      );
     });
 
-    const browseProjectDirectories = Effect.fn(function* (input: { readonly path?: string }) {
+    const toWebPushRpcError = (cause: unknown, fallbackMessage: string) =>
+      new WebPushRpcError({
+        message: cause instanceof Error ? cause.message : fallbackMessage,
+        cause,
+      });
+
+    const toProjectBrowseDirectoriesError = (cause: unknown, fallbackMessage: string) =>
+      new ProjectBrowseDirectoriesError({
+        message: cause instanceof Error ? cause.message : fallbackMessage,
+        cause,
+      });
+
+    const browseProjectDirectories = Effect.fn(function* (input: {
+      readonly path?: string | undefined;
+    }) {
       const requestedPath =
         input.path !== undefined && input.path.trim().length > 0 ? input.path.trim() : config.cwd;
       const currentPath = path.resolve(yield* expandHomePath(requestedPath));
       const stat = yield* Effect.tryPromise({
         try: () => fs.stat(currentPath),
-        catch: (cause) => new Error(`Directory does not exist: ${currentPath}: ${String(cause)}`),
+        catch: (cause) =>
+          toProjectBrowseDirectoriesError(
+            cause,
+            `Directory does not exist: ${currentPath}: ${String(cause)}`,
+          ),
       });
       if (!stat.isDirectory()) {
-        return yield* Effect.fail(new Error(`Path is not a directory: ${currentPath}`));
+        return yield* toProjectBrowseDirectoriesError(
+          undefined,
+          `Path is not a directory: ${currentPath}`,
+        );
       }
       const directoryEntries = yield* Effect.tryPromise({
         try: () => fs.readdir(currentPath, { withFileTypes: true }),
-        catch: (cause) => new Error(`Failed to read directory: ${String(cause)}`),
+        catch: (cause) =>
+          toProjectBrowseDirectoriesError(cause, `Failed to read directory: ${String(cause)}`),
       });
 
       const entries = directoryEntries
@@ -232,14 +267,13 @@ const WsRpcLayer = WsRpcGroup.toLayer(
 
       const homePath = path.resolve(yield* expandHomePath("~"));
       const currentRoot = path.parse(currentPath).root || "/";
+      const rootCandidates: ReadonlyArray<{ readonly label: string; readonly path: string }> = [
+        { label: "Current", path: path.resolve(config.cwd) },
+        { label: "Home", path: homePath },
+        { label: "Root", path: currentRoot },
+      ];
       const roots = Array.from(
-        new Map(
-          [
-            ["Current", path.resolve(config.cwd)],
-            ["Home", homePath],
-            ["Root", currentRoot],
-          ].map(([label, absolutePath]) => [absolutePath, { label, path: absolutePath }] as const),
-        ).values(),
+        new Map(rootCandidates.map((root) => [root.path, root] as const)).values(),
       );
 
       const parentPath = (() => {
@@ -845,19 +879,35 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.notificationsGetWebPushConfig]: (_input) =>
         observeRpcEffect(
           WS_METHODS.notificationsGetWebPushConfig,
-          webPushService.getWebPushConfig,
+          webPushService.getWebPushConfig.pipe(
+            Effect.mapError((cause) =>
+              toWebPushRpcError(cause, "Failed to load web push configuration."),
+            ),
+          ),
           { "rpc.aggregate": "notifications" },
         ),
       [WS_METHODS.notificationsUpsertWebPushSubscription]: (input) =>
         observeRpcEffect(
           WS_METHODS.notificationsUpsertWebPushSubscription,
-          webPushService.upsertWebPushSubscription(input),
+          webPushService
+            .upsertWebPushSubscription(input)
+            .pipe(
+              Effect.mapError((cause) =>
+                toWebPushRpcError(cause, "Failed to save web push subscription."),
+              ),
+            ),
           { "rpc.aggregate": "notifications" },
         ),
       [WS_METHODS.notificationsRemoveWebPushSubscription]: (input) =>
         observeRpcEffect(
           WS_METHODS.notificationsRemoveWebPushSubscription,
-          webPushService.removeWebPushSubscription(input),
+          webPushService
+            .removeWebPushSubscription(input)
+            .pipe(
+              Effect.mapError((cause) =>
+                toWebPushRpcError(cause, "Failed to remove web push subscription."),
+              ),
+            ),
           { "rpc.aggregate": "notifications" },
         ),
       [WS_METHODS.subscribeTerminalEvents]: (_input) =>
@@ -925,7 +975,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           }),
           { "rpc.aggregate": "server" },
         ),
-      [ORCHESTRATION_WS_METHODS.importCodexThread]: (input) => importCodexThread(input),
+      [ORCHESTRATION_WS_METHODS.importCodexThread]: (input) =>
+        observeRpcEffect(ORCHESTRATION_WS_METHODS.importCodexThread, importCodexThread(input), {
+          "rpc.aggregate": "orchestration",
+        }),
     });
   }),
 );

@@ -165,9 +165,13 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       getWebPushConfig: () =>
         transport.request((client) => client[WS_METHODS.notificationsGetWebPushConfig]({})),
       upsertWebPushSubscription: (input) =>
-        transport.request((client) => client[WS_METHODS.notificationsUpsertWebPushSubscription](input)),
+        transport.request((client) =>
+          client[WS_METHODS.notificationsUpsertWebPushSubscription](input),
+        ),
       removeWebPushSubscription: (input) =>
-        transport.request((client) => client[WS_METHODS.notificationsRemoveWebPushSubscription](input)),
+        transport.request((client) =>
+          client[WS_METHODS.notificationsRemoveWebPushSubscription](input),
+        ),
     },
     git: {
       pull: (input) => transport.request((client) => client[WS_METHODS.gitPull](input)),

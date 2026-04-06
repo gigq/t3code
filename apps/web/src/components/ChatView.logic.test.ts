@@ -4,9 +4,7 @@ import { useStore } from "../store";
 
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
-  buildExpiredTerminalContextToastCopy,
   createLocalDispatchSnapshot,
-  deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   shouldResetSendPhaseFromLatestTurn,
   reconcileMountedTerminalThreadIds,
