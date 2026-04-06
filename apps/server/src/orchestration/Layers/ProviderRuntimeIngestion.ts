@@ -1239,14 +1239,56 @@ const make = Effect.fn("make")(function* () {
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
     const activeTurnId = thread.session?.activeTurnId ?? null;
+    const activeTurnLooksCompletedInReadModel =
+      activeTurnId !== null &&
+      thread.latestTurn !== null &&
+      sameId(thread.latestTurn.turnId, activeTurnId) &&
+      (thread.latestTurn.state === "completed" ||
+        thread.latestTurn.state === "error" ||
+        thread.latestTurn.state === "interrupted");
+    const normalizedActiveTurnId = activeTurnLooksCompletedInReadModel ? null : activeTurnId;
+    const shouldRecoverStaleSessionFromTurnScopedEvent =
+      normalizedActiveTurnId === null &&
+      activeTurnId !== null &&
+      eventTurnId !== undefined &&
+      !sameId(activeTurnId, eventTurnId) &&
+      event.type !== "turn.started" &&
+      event.type !== "turn.completed";
+    const effectiveSessionStatus = shouldRecoverStaleSessionFromTurnScopedEvent
+      ? "running"
+      : (thread.session?.status ?? null);
+    const effectiveActiveTurnId = shouldRecoverStaleSessionFromTurnScopedEvent
+      ? (eventTurnId ?? null)
+      : normalizedActiveTurnId;
+
+    if (shouldRecoverStaleSessionFromTurnScopedEvent && eventTurnId) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.session.set",
+        commandId: providerCommandId(event, "thread-session-set-stale-turn-recovery"),
+        threadId: thread.id,
+        session: {
+          threadId: thread.id,
+          status: "running",
+          providerName: event.provider,
+          runtimeMode: thread.session?.runtimeMode ?? "full-access",
+          activeTurnId: eventTurnId,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+    }
+
     const shouldDeferReadySessionTransition =
       event.type === "session.state.changed" &&
       event.payload.state === "ready" &&
-      activeTurnId !== null;
+      effectiveActiveTurnId !== null;
 
     const conflictsWithActiveTurn =
-      activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
-    const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
+      effectiveActiveTurnId !== null &&
+      eventTurnId !== undefined &&
+      !sameId(effectiveActiveTurnId, eventTurnId);
+    const missingTurnForActiveTurn = effectiveActiveTurnId !== null && eventTurnId === undefined;
 
     const shouldApplyThreadLifecycle = (() => {
       if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
@@ -1265,8 +1307,8 @@ const make = Effect.fn("make")(function* () {
             return false;
           }
           // Only the active turn may close the lifecycle state.
-          if (activeTurnId !== null && eventTurnId !== undefined) {
-            return sameId(activeTurnId, eventTurnId);
+          if (effectiveActiveTurnId !== null && eventTurnId !== undefined) {
+            return sameId(effectiveActiveTurnId, eventTurnId);
           }
           // If no active turn is tracked, accept completion scoped to this thread.
           return true;
@@ -1298,8 +1340,8 @@ const make = Effect.fn("make")(function* () {
     ) {
       const nextActiveTurnId = nextActiveTurnIdForLifecycleEvent({
         event,
-        activeTurnId,
-        currentSessionStatus: thread.session?.status ?? null,
+        activeTurnId: effectiveActiveTurnId,
+        currentSessionStatus: effectiveSessionStatus,
         eventTurnId,
       });
       const status = (() => {
@@ -1316,7 +1358,7 @@ const make = Effect.fn("make")(function* () {
           case "thread.started":
             // Provider thread/session start notifications can arrive during an
             // active turn; preserve turn-running state in that case.
-            return thread.session?.status === "running" ? "running" : "ready";
+            return effectiveSessionStatus === "running" ? "running" : "ready";
         }
       })();
       const lastError =
@@ -1465,9 +1507,9 @@ const make = Effect.fn("make")(function* () {
         tracking.assistantMessageId = assistantMessageId;
         yield* forgetAssistantMessageId(thread.id, turnId, assistantMessageId);
         if (
-          thread.session?.status === "running" &&
-          thread.session.activeTurnId !== null &&
-          sameId(thread.session.activeTurnId, turnId)
+          effectiveSessionStatus === "running" &&
+          effectiveActiveTurnId !== null &&
+          sameId(effectiveActiveTurnId, turnId)
         ) {
           yield* schedulePendingTurnCompletionFallback({
             event,
@@ -1493,17 +1535,20 @@ const make = Effect.fn("make")(function* () {
     }
 
     if (shouldDeferReadySessionTransition) {
-      const tracking = getOrCreateTurnCompletionTracking(thread.id, activeTurnId);
+      if (effectiveActiveTurnId === null) {
+        return;
+      }
+      const tracking = getOrCreateTurnCompletionTracking(thread.id, effectiveActiveTurnId);
       yield* schedulePendingTurnCompletionFallback({
         event,
         threadId: thread.id,
-        turnId: activeTurnId,
+        turnId: effectiveActiveTurnId,
         assistantMessageId: tracking.assistantMessageId,
         activitySequence: tracking.activitySequence,
       });
       yield* Effect.logInfo("provider runtime ingestion deferred ready session transition", {
         threadId: thread.id,
-        turnId: activeTurnId,
+        turnId: effectiveActiveTurnId,
         assistantMessageId: tracking.assistantMessageId,
         activitySequence: tracking.activitySequence,
         activeToolItemCount: tracking.activeToolItemIds.size,
@@ -1568,7 +1613,9 @@ const make = Effect.fn("make")(function* () {
 
       const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
         ? true
-        : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
+        : effectiveActiveTurnId === null ||
+          eventTurnId === undefined ||
+          sameId(effectiveActiveTurnId, eventTurnId);
 
       if (shouldApplyRuntimeError) {
         yield* orchestrationEngine.dispatch({

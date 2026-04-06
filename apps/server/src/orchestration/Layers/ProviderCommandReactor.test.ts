@@ -1618,6 +1618,10 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    expect(harness.stopSession.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      preserveBinding: true,
+    });
     const readModel = await Effect.runPromise(harness.engine.getReadModel());
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
     expect(thread?.session).not.toBeNull();
@@ -1679,6 +1683,10 @@ describe("ProviderCommandReactor", () => {
       );
 
       await waitFor(() => harness.stopSession.mock.calls.length === 1);
+      expect(harness.stopSession.mock.calls[0]?.[0]).toMatchObject({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        preserveBinding: true,
+      });
       await waitFor(async () => {
         const readModel = await Effect.runPromise(harness.engine.getReadModel());
         const thread = readModel.threads.find(
@@ -1692,7 +1700,9 @@ describe("ProviderCommandReactor", () => {
       });
 
       const readModel = await Effect.runPromise(harness.engine.getReadModel());
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+      const thread = readModel.threads.find(
+        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      );
       expect(thread?.interactionMode).toBe("default");
       expect(thread?.autoDeferUntil).toBeNull();
       expect(thread?.session?.status).toBe("stopped");

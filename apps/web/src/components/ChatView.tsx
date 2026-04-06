@@ -38,6 +38,7 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { shouldResetInteractionModeDraftOverride } from "../interactionMode";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -557,6 +558,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  const previousServerInteractionModeRef = useRef<ProviderInteractionMode | null>(
+    serverThread?.interactionMode ?? null,
+  );
+  useEffect(() => {
+    const previousServerInteractionMode = previousServerInteractionModeRef.current;
+    const nextServerInteractionMode = serverThread?.interactionMode ?? null;
+
+    if (
+      shouldResetInteractionModeDraftOverride({
+        draftInteractionMode: composerDraft.interactionMode,
+        previousServerInteractionMode,
+        nextServerInteractionMode,
+      })
+    ) {
+      setComposerDraftInteractionMode(threadId, null);
+    }
+
+    previousServerInteractionModeRef.current = nextServerInteractionMode;
+  }, [
+    composerDraft.interactionMode,
+    serverThread?.interactionMode,
+    setComposerDraftInteractionMode,
+    threadId,
+  ]);
   const preferredImplementationInteractionModeRef = useRef<"default" | "auto">("default");
   useEffect(() => {
     if (interactionMode !== "plan") {
@@ -4283,7 +4308,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   ? "bg-amber-500/90 hover:bg-amber-500"
                                   : "bg-primary/90 text-primary-foreground hover:bg-primary",
                               )}
-                              disabled={isSendBusy || isConnecting || (!shouldShowAutoModeTimer && !canSendFromComposer)}
+                              disabled={
+                                isSendBusy ||
+                                isConnecting ||
+                                (!shouldShowAutoModeTimer && !canSendFromComposer)
+                              }
                               onClick={
                                 shouldShowAutoModeTimer
                                   ? () => void handleInteractionModeChange("default")

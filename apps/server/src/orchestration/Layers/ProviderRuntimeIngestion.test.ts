@@ -856,6 +856,109 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.messages.at(-1)?.text).toBe("<t3code:auto-noop />");
   });
 
+  it("recovers from a stale completed active turn when auto-stop arrives without a new turn.started", async () => {
+    process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "100";
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const staleTurnId = asTurnId("turn-stale-completed");
+    const recoveredTurnId = asTurnId("turn-auto-stop-recovered");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-mode-stop-recovery"),
+        threadId: asThreadId("thread-1"),
+        interactionMode: "auto",
+        createdAt: now,
+      }),
+    );
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-stale-turn-started"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: staleTurnId,
+    });
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-stale-completed",
+    );
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-stale-turn-completed"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: staleTurnId,
+      payload: {
+        state: "completed",
+      },
+    });
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.latestTurn?.turnId === "turn-stale-completed" &&
+        entry.latestTurn?.state === "completed",
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-stale-session-starting"),
+        threadId: asThreadId("thread-1"),
+        session: {
+          threadId: asThreadId("thread-1"),
+          status: "starting",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: staleTurnId,
+          updatedAt: now,
+          lastError: null,
+        },
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-auto-stop-stale-session-recovery"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: recoveredTurnId,
+      itemId: asItemId("item-auto-stop-stale-session-recovery"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "<t3code:auto-stop />",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.interactionMode === DEFAULT_PROVIDER_INTERACTION_MODE &&
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.latestTurn?.turnId === "turn-auto-stop-recovered" &&
+        entry.latestTurn?.state === "completed" &&
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-auto-stop-stale-session-recovery" &&
+            message.text === "<t3code:auto-noop />",
+        ),
+      1000,
+    );
+
+    expect(thread.interactionMode).toBe(DEFAULT_PROVIDER_INTERACTION_MODE);
+    expect(thread.session?.status).toBe("ready");
+    expect(thread.latestTurn?.turnId).toBe("turn-auto-stop-recovered");
+  });
+
   it("does not complete a turn early when session ready arrives before later turn activity", async () => {
     process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "200";
     const harness = await createHarness();

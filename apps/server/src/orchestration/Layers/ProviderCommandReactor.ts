@@ -920,7 +920,10 @@ const make = Effect.gen(function* () {
     }
 
     if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+      yield* providerService.stopSession({
+        threadId: thread.id,
+        preserveBinding: true,
+      });
     }
 
     yield* setThreadSession({

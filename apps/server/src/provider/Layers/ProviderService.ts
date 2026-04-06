@@ -454,12 +454,45 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           operation: "ProviderService.stopSession",
           allowRecovery: false,
         });
+        const stoppedAt = new Date().toISOString();
+        const activeSession = routed.isActive
+          ? yield* routed.adapter
+              .listSessions()
+              .pipe(
+                Effect.map((sessions) =>
+                  sessions.find((session) => session.threadId === input.threadId),
+                ),
+              )
+          : undefined;
+        if (activeSession) {
+          yield* upsertSessionBinding(activeSession, input.threadId, {
+            lastRuntimeEvent: "provider.stopSession",
+            lastRuntimeEventAt: stoppedAt,
+          });
+        }
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
-        yield* directory.remove(input.threadId);
+        if (input.preserveBinding) {
+          yield* directory.upsert({
+            threadId: input.threadId,
+            provider: routed.adapter.provider,
+            status: "stopped",
+            ...(activeSession?.resumeCursor !== undefined
+              ? { resumeCursor: activeSession.resumeCursor }
+              : {}),
+            runtimePayload: {
+              activeTurnId: null,
+              lastRuntimeEvent: "provider.stopSession",
+              lastRuntimeEventAt: stoppedAt,
+            },
+          });
+        } else {
+          yield* directory.remove(input.threadId);
+        }
         yield* analytics.record("provider.session.stopped", {
           provider: routed.adapter.provider,
+          preserveBinding: input.preserveBinding === true,
         });
       });
 
