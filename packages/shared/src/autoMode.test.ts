@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAutoModeTickPrompt,
   AUTO_MODE_NOOP_SENTINEL,
   isAutoModeHiddenControlMessage,
+  isAutoModeHiddenMessage,
+  isAutoModeTickPromptMessage,
   parseAutoModeControlMessage,
 } from "./autoMode";
 
@@ -39,5 +42,13 @@ describe("autoMode control messages", () => {
     expect(isAutoModeHiddenControlMessage(AUTO_MODE_NOOP_SENTINEL)).toBe(true);
     expect(isAutoModeHiddenControlMessage('<t3code:auto-defer preset="1h" />')).toBe(true);
     expect(isAutoModeHiddenControlMessage("normal assistant text")).toBe(false);
+  });
+
+  it("recognizes leaked auto tick prompts as hidden messages", () => {
+    const tickPrompt = buildAutoModeTickPrompt("2026-04-06T01:13:25.697Z");
+    expect(isAutoModeTickPromptMessage(tickPrompt)).toBe(true);
+    expect(isAutoModeHiddenMessage(tickPrompt)).toBe(true);
+    expect(isAutoModeHiddenMessage(AUTO_MODE_NOOP_SENTINEL)).toBe(true);
+    expect(isAutoModeHiddenMessage("normal assistant text")).toBe(false);
   });
 });

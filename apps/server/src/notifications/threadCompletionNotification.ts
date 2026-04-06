@@ -4,7 +4,7 @@ import type {
   OrchestrationReadModel,
   ThreadCompletionNotificationPayload,
 } from "@t3tools/contracts";
-import { isAutoModeHiddenControlMessage } from "@t3tools/shared/autoMode";
+import { isAutoModeHiddenMessage } from "@t3tools/shared/autoMode";
 
 const MAX_BODY_CHARS = 160;
 const DEFAULT_NOTIFICATION_TITLE = "Thread completed";
@@ -68,7 +68,7 @@ function resolveAssistantMessageText(
           right.createdAt.localeCompare(left.createdAt),
       )[0];
 
-  if (message && isAutoModeHiddenControlMessage(message.text)) {
+  if (message && isAutoModeHiddenMessage(message.text)) {
     return "";
   }
 

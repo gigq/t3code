@@ -48,6 +48,15 @@ export function isAutoModeHiddenControlMessage(text: string): boolean {
   return parseAutoModeControlMessage(text) !== null;
 }
 
+export function isAutoModeTickPromptMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.startsWith("<auto_tick>") && trimmed.endsWith("</auto_tick>");
+}
+
+export function isAutoModeHiddenMessage(text: string): boolean {
+  return isAutoModeHiddenControlMessage(text) || isAutoModeTickPromptMessage(text);
+}
+
 export function parseAutoModeDeferUntilMs(value: string | null | undefined): number | null {
   if (!value) {
     return null;
