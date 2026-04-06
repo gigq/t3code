@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { WsConnectionStatus } from "../rpc/wsConnectionState";
-import { shouldAutoReconnect } from "./WebSocketConnectionSurface";
+import {
+  shouldAutoReconnect,
+  SLOW_RPC_ACK_TOAST_DISMISS_AFTER_VISIBLE_MS,
+} from "./WebSocketConnectionSurface";
 
 function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionStatus {
   return {
@@ -25,6 +28,10 @@ function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionSt
 }
 
 describe("WebSocketConnectionSurface.logic", () => {
+  it("uses a 5 second visible dismiss window for slow request toasts", () => {
+    expect(SLOW_RPC_ACK_TOAST_DISMISS_AFTER_VISIBLE_MS).toBe(5_000);
+  });
+
   it("forces reconnect on online when the app was offline", () => {
     expect(
       shouldAutoReconnect(

@@ -19,6 +19,10 @@ describe("requestLatencyState", () => {
     vi.useRealTimers();
   });
 
+  it("uses a 30 second slow request threshold", () => {
+    expect(SLOW_RPC_ACK_THRESHOLD_MS).toBe(30_000);
+  });
+
   it("marks unary requests as slow when the ack threshold is exceeded", () => {
     trackRpcRequestSent("1", "server.getConfig");
     vi.advanceTimersByTime(SLOW_RPC_ACK_THRESHOLD_MS - 1);

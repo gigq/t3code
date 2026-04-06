@@ -19,6 +19,7 @@ import { toastManager } from "./ui/toast";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
+export const SLOW_RPC_ACK_TOAST_DISMISS_AFTER_VISIBLE_MS = 5_000;
 type WsAutoReconnectTrigger = "focus" | "online";
 
 const connectionTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -491,8 +492,14 @@ export function SlowRpcAckToastCoordinator() {
   const slowRequests = useSlowRpcAckRequests();
   const status = useWsConnectionStatus();
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
+  const toastResetTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (toastResetTimerRef.current !== null) {
+      window.clearTimeout(toastResetTimerRef.current);
+      toastResetTimerRef.current = null;
+    }
+
     if (getWsConnectionUiState(status) !== "connected") {
       if (toastIdRef.current) {
         toastManager.close(toastIdRef.current);
@@ -514,6 +521,10 @@ export function SlowRpcAckToastCoordinator() {
       timeout: 0,
       title: "Some requests are slow",
       type: "warning" as const,
+      data: {
+        dismissAfterVisibleMs: SLOW_RPC_ACK_TOAST_DISMISS_AFTER_VISIBLE_MS,
+        hideCopyButton: true,
+      },
     };
 
     if (toastIdRef.current) {
@@ -521,7 +532,25 @@ export function SlowRpcAckToastCoordinator() {
     } else {
       toastIdRef.current = toastManager.add(nextToast);
     }
+
+    const activeToastId = toastIdRef.current;
+    toastResetTimerRef.current = window.setTimeout(() => {
+      if (toastIdRef.current !== activeToastId) {
+        return;
+      }
+      toastManager.close(activeToastId);
+      toastIdRef.current = null;
+      toastResetTimerRef.current = null;
+    }, SLOW_RPC_ACK_TOAST_DISMISS_AFTER_VISIBLE_MS + 250);
   }, [slowRequests, status]);
+
+  useEffect(() => {
+    return () => {
+      if (toastResetTimerRef.current !== null) {
+        window.clearTimeout(toastResetTimerRef.current);
+      }
+    };
+  }, []);
 
   return null;
 }
