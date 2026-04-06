@@ -108,6 +108,8 @@ export function buildAutoModeTickPrompt(nowIso: string): string {
     "You are in background auto mode for an active coding thread.",
     "Review the latest repository state, recent errors, pending follow-ups, and unfinished work.",
     "If there is a concrete useful action you can safely take right now, take it and keep any user-facing update concise.",
+    "If the thread already has an accepted plan or an obvious in-progress checklist, keep executing it until the plan is complete or you are truly blocked.",
+    "Do not stop merely because you finished one step if the remaining planned work is still actionable.",
     'If you want to sleep until later, respond with exactly one control tag like <t3code:auto-defer preset="15m" />, <t3code:auto-defer preset="1h" />, <t3code:auto-defer preset="tomorrow-8am" />, or <t3code:auto-defer until="2026-04-06T13:00:00.000Z" />.',
     `If you have reached a clean stopping point and do not expect a useful next step until the user changes something, respond with exactly ${AUTO_MODE_STOP_SENTINEL}.`,
     `If there is nothing worth doing right now, respond with exactly ${AUTO_MODE_NOOP_SENTINEL} and nothing else.`,

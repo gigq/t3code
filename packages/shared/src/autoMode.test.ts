@@ -56,6 +56,12 @@ describe("autoMode control messages", () => {
     expect(isAutoModeHiddenMessage(tickPrompt)).toBe(true);
     expect(isAutoModeHiddenMessage(AUTO_MODE_NOOP_SENTINEL)).toBe(true);
     expect(tickPrompt).toContain(AUTO_MODE_STOP_SENTINEL);
+    expect(tickPrompt).toContain(
+      "If the thread already has an accepted plan or an obvious in-progress checklist, keep executing it until the plan is complete or you are truly blocked.",
+    );
+    expect(tickPrompt).toContain(
+      "Do not stop merely because you finished one step if the remaining planned work is still actionable.",
+    );
     expect(isAutoModeHiddenMessage("normal assistant text")).toBe(false);
   });
 });

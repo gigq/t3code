@@ -74,10 +74,23 @@ const HttpServerLive = Layer.unwrap(
         ...(config.host ? { hostname: config.host } : {}),
       });
     } else {
-      const [NodeHttpServer, NodeHttp] = yield* Effect.all([
+      const [NodeHttpServer, NodeHttp, NodeHttps, NodeFs] = yield* Effect.all([
         Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
         Effect.promise(() => import("node:http")),
+        Effect.promise(() => import("node:https")),
+        Effect.promise(() => import("node:fs/promises")),
       ]);
+      const tlsConfig = config.tls;
+      if (tlsConfig) {
+        const [cert, key] = yield* Effect.all([
+          Effect.promise(() => NodeFs.readFile(tlsConfig.certPath)),
+          Effect.promise(() => NodeFs.readFile(tlsConfig.keyPath)),
+        ]);
+        return NodeHttpServer.layer(() => NodeHttps.createServer({ cert, key }), {
+          host: config.host,
+          port: config.port,
+        });
+      }
       return NodeHttpServer.layer(NodeHttp.createServer, {
         host: config.host,
         port: config.port,

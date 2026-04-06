@@ -7,6 +7,7 @@ import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
 
 import {
   buildCodexInitializeParams,
+  CODEX_AUTO_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CodexAppServerManager,
@@ -604,6 +605,45 @@ describe("sendTurn", () => {
         },
       },
     });
+  });
+
+  it("passes Codex auto mode as a collaboration preset on turn/start", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "<auto_tick>\nCurrent time: 2026-04-06T18:22:49.388Z\n</auto_tick>",
+      interactionMode: "auto",
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "<auto_tick>\nCurrent time: 2026-04-06T18:22:49.388Z\n</auto_tick>",
+          text_elements: [],
+        },
+      ],
+      model: "gpt-5.3-codex",
+      collaborationMode: {
+        mode: "default",
+        settings: {
+          model: "gpt-5.3-codex",
+          reasoning_effort: "medium",
+          developer_instructions: CODEX_AUTO_MODE_DEVELOPER_INSTRUCTIONS,
+        },
+      },
+    });
+  });
+
+  it("includes plan-completion guidance in the Codex auto mode instructions", () => {
+    expect(CODEX_AUTO_MODE_DEVELOPER_INSTRUCTIONS).toContain(
+      "If the thread already has an accepted plan or an in-progress checklist, continue executing it until completion unless you are truly blocked.",
+    );
+    expect(CODEX_AUTO_MODE_DEVELOPER_INSTRUCTIONS).toContain(
+      "Do not stop after a partial milestone when the remaining planned work is still actionable.",
+    );
   });
 
   it("keeps the session model when interaction mode is set without an explicit model", async () => {

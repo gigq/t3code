@@ -963,6 +963,108 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.latestTurn?.turnId).toBe("turn-auto-stop-recovered");
   });
 
+  it("rebinds a restarted starting session when a fresh turn.started arrives after the previous active turn settled", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const staleTurnId = asTurnId("turn-stale-completed-for-restart");
+    const recoveredTurnId = asTurnId("turn-restarted-session-recovered");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-restart-stale-turn-started"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: staleTurnId,
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-stale-completed-for-restart",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-restart-stale-turn-completed"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: staleTurnId,
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.latestTurn?.turnId === "turn-stale-completed-for-restart" &&
+        entry.latestTurn?.state === "completed",
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-restart-stale-session-starting"),
+        threadId: asThreadId("thread-1"),
+        session: {
+          threadId: asThreadId("thread-1"),
+          status: "starting",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: staleTurnId,
+          updatedAt: now,
+          lastError: null,
+        },
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-restart-recovered-turn-started"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: recoveredTurnId,
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-restarted-session-recovered",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-restart-recovered-turn-completed"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: recoveredTurnId,
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.latestTurn?.turnId === "turn-restarted-session-recovered" &&
+        entry.latestTurn?.state === "completed",
+    );
+
+    expect(thread.session?.status).toBe("ready");
+    expect(thread.latestTurn?.turnId).toBe("turn-restarted-session-recovered");
+  });
+
   it("does not complete a turn early when session ready arrives before later turn activity", async () => {
     process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "200";
     const harness = await createHarness();

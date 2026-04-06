@@ -30,6 +30,9 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   logWebSocketEvents: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
+  tlsCertPath: Schema.optional(Schema.String),
+  tlsKeyPath: Schema.optional(Schema.String),
+  webPushVapidSubject: Schema.optional(Schema.String),
 });
 
 const modeFlag = Flag.choice("mode", RuntimeMode.literals).pipe(
@@ -111,6 +114,18 @@ const EnvServerConfig = Config.all({
   ),
   port: Config.port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
   host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  tlsCertPath: Config.string("T3CODE_TLS_CERT_PATH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  tlsKeyPath: Config.string("T3CODE_TLS_KEY_PATH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  webPushVapidSubject: Config.string("T3CODE_WEB_PUSH_VAPID_SUBJECT").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
@@ -290,6 +305,37 @@ export const resolveServerConfig = (
       ),
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
+    const tlsCertPath = Option.getOrUndefined(
+      resolveOptionPrecedence(
+        Option.fromUndefinedOr(env.tlsCertPath),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.tlsCertPath),
+        ),
+      ),
+    );
+    const tlsKeyPath = Option.getOrUndefined(
+      resolveOptionPrecedence(
+        Option.fromUndefinedOr(env.tlsKeyPath),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.tlsKeyPath),
+        ),
+      ),
+    );
+    const webPushVapidSubject = Option.getOrUndefined(
+      resolveOptionPrecedence(
+        Option.fromUndefinedOr(env.webPushVapidSubject),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.webPushVapidSubject),
+        ),
+      ),
+    );
+    const tls =
+      tlsCertPath && tlsKeyPath
+        ? {
+            certPath: path.resolve(yield* expandHomePath(tlsCertPath.trim())),
+            keyPath: path.resolve(yield* expandHomePath(tlsKeyPath.trim())),
+          }
+        : undefined;
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
     const config: ServerConfigShape = {
@@ -324,8 +370,8 @@ export const resolveServerConfig = (
       ...derivedPaths,
       serverTracePath,
       host,
-      tls: undefined,
-      webPushVapidSubject: undefined,
+      tls,
+      webPushVapidSubject,
       staticDir,
       devUrl,
       noBrowser,

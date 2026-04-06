@@ -140,6 +140,11 @@ const buildCmd = Command.make(
         })`bun tsdown`,
       );
 
+      const distDir = path.join(serverDir, "dist");
+      yield* fs.writeFileString(path.join(distDir, "index.mjs"), 'import "./bin.mjs";\n');
+      yield* fs.writeFileString(path.join(distDir, "index.cjs"), 'require("./bin.cjs");\n');
+      yield* Effect.log("[cli] Wrote dist/index compatibility shims");
+
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");
 

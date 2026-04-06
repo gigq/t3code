@@ -1242,6 +1242,19 @@ const make = Effect.fn("make")(function* () {
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
     const activeTurnId = thread.session?.activeTurnId ?? null;
+    const activeTurnProjection = activeTurnId
+      ? yield* projectionTurnRepository
+          .getByTurnId({
+            threadId: thread.id,
+            turnId: activeTurnId,
+          })
+          .pipe(Effect.orElseSucceed(() => Option.none()))
+      : Option.none();
+    const activeTurnLooksSettledInProjection =
+      Option.isSome(activeTurnProjection) &&
+      (activeTurnProjection.value.state === "completed" ||
+        activeTurnProjection.value.state === "error" ||
+        activeTurnProjection.value.state === "interrupted");
     const activeTurnLooksCompletedInReadModel =
       activeTurnId !== null &&
       thread.latestTurn !== null &&
@@ -1249,7 +1262,10 @@ const make = Effect.fn("make")(function* () {
       (thread.latestTurn.state === "completed" ||
         thread.latestTurn.state === "error" ||
         thread.latestTurn.state === "interrupted");
-    const normalizedActiveTurnId = activeTurnLooksCompletedInReadModel ? null : activeTurnId;
+    const normalizedActiveTurnId =
+      activeTurnLooksCompletedInReadModel || activeTurnLooksSettledInProjection
+        ? null
+        : activeTurnId;
     const shouldRecoverStaleSessionFromTurnScopedEvent =
       normalizedActiveTurnId === null &&
       activeTurnId !== null &&
