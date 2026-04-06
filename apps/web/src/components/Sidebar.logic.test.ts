@@ -463,7 +463,7 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({
       label: "Waiting",
       pulse: false,
-      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      dotClass: "bg-amber-500/90",
     });
   });
 
@@ -485,7 +485,7 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({
       label: "Waiting",
       pulse: false,
-      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      dotClass: "bg-amber-500/90",
     });
   });
 
@@ -500,7 +500,7 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({
       label: "Working",
       pulse: true,
-      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      dotClass: "bg-amber-500/90",
     });
   });
 

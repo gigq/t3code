@@ -40,6 +40,8 @@ export interface ThreadGitIndicator {
   tooltip: string;
 }
 
+const AUTO_MODE_STATUS_DOT_CLASS = "bg-amber-500/90";
+
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,
@@ -347,9 +349,7 @@ export function resolveThreadStatusPill(input: {
       colorClass: isAutoThread
         ? "text-amber-600 dark:text-amber-300/90"
         : "text-sky-600 dark:text-sky-300/80",
-      dotClass: isAutoThread
-        ? "bg-amber-500 dark:bg-amber-300/90"
-        : "bg-sky-500 dark:bg-sky-300/80",
+      dotClass: isAutoThread ? AUTO_MODE_STATUS_DOT_CLASS : "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
     };
   }
@@ -358,7 +358,7 @@ export function resolveThreadStatusPill(input: {
     return {
       label: "Waiting",
       colorClass: "text-amber-600 dark:text-amber-300/90",
-      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      dotClass: AUTO_MODE_STATUS_DOT_CLASS,
       pulse: false,
     };
   }
