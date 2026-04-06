@@ -1,6 +1,5 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import { isAutoModeDeferred } from "@t3tools/shared/autoMode";
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
@@ -24,8 +23,8 @@ export type ThreadTraversalDirection = "previous" | "next";
 export interface ThreadStatusPill {
   label:
     | "Working"
+    | "Waiting"
     | "Connecting"
-    | "Auto Waiting"
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
@@ -46,7 +45,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Awaiting Input": 4,
   Working: 3,
   Connecting: 3,
-  "Auto Waiting": 2,
+  Waiting: 2,
   "Plan Ready": 2,
   Completed: 1,
 };
@@ -322,6 +321,7 @@ export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {
   const { thread } = input;
+  const isAutoThread = thread.interactionMode === "auto";
 
   if (thread.hasPendingApprovals) {
     return {
@@ -344,9 +344,22 @@ export function resolveThreadStatusPill(input: {
   if (thread.session?.status === "running") {
     return {
       label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      colorClass: isAutoThread
+        ? "text-amber-600 dark:text-amber-300/90"
+        : "text-sky-600 dark:text-sky-300/80",
+      dotClass: isAutoThread
+        ? "bg-amber-500 dark:bg-amber-300/90"
+        : "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
+    };
+  }
+
+  if (isAutoThread) {
+    return {
+      label: "Waiting",
+      colorClass: "text-amber-600 dark:text-amber-300/90",
+      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      pulse: false,
     };
   }
 
@@ -356,15 +369,6 @@ export function resolveThreadStatusPill(input: {
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
-    };
-  }
-
-  if (thread.interactionMode === "auto" && isAutoModeDeferred(thread.autoDeferUntil)) {
-    return {
-      label: "Auto Waiting",
-      colorClass: "text-amber-600 dark:text-amber-300/90",
-      dotClass: "bg-amber-500 dark:bg-amber-300/90",
-      pulse: false,
     };
   }
 

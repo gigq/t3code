@@ -444,7 +444,7 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Working", pulse: true });
   });
 
-  it("shows auto waiting for deferred auto threads that are not currently running", () => {
+  it("shows waiting for deferred auto threads that are not currently running", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
@@ -461,8 +461,45 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toMatchObject({
-      label: "Auto Waiting",
+      label: "Waiting",
       pulse: false,
+      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+    });
+  });
+
+  it("shows waiting for non-deferred auto threads that are idle but still in auto mode", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "auto",
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({
+      label: "Waiting",
+      pulse: false,
+      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+    });
+  });
+
+  it("uses the auto waiting color for running auto threads", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "auto",
+        },
+      }),
+    ).toMatchObject({
+      label: "Working",
+      pulse: true,
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
     });
   });
@@ -570,7 +607,7 @@ describe("resolveProjectStatusIndicator", () => {
           pulse: true,
         },
         {
-          label: "Auto Waiting",
+          label: "Waiting",
           colorClass: "text-amber-600",
           dotClass: "bg-amber-500",
           pulse: false,
@@ -602,7 +639,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Auto Waiting",
+          label: "Waiting",
           colorClass: "text-amber-600",
           dotClass: "bg-amber-500",
           pulse: false,
