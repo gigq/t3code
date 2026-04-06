@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationProposedPlanId,
@@ -753,7 +754,8 @@ const make = Effect.fn("make")(function* () {
     const autoModeControl = parseAutoModeControlMessage(rawText, new Date(input.createdAt));
     const shouldEmitCompletionDelta = bufferedText.length > 0 || fallbackText.length > 0;
     const text =
-      autoModeControl?.kind === "defer" && shouldEmitCompletionDelta
+      (autoModeControl?.kind === "defer" || autoModeControl?.kind === "stop") &&
+      shouldEmitCompletionDelta
         ? AUTO_MODE_NOOP_SENTINEL
         : rawText;
 
@@ -775,6 +777,16 @@ const make = Effect.fn("make")(function* () {
         commandId: providerCommandId(input.event, "auto-defer-set"),
         threadId: input.threadId,
         autoDeferUntil: autoModeControl.deferUntil,
+        createdAt: input.createdAt,
+      });
+    }
+
+    if (autoModeControl?.kind === "stop") {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: providerCommandId(input.event, "auto-stop-interaction-mode-set"),
+        threadId: input.threadId,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         createdAt: input.createdAt,
       });
     }

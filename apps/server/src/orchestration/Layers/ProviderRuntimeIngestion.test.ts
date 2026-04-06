@@ -797,6 +797,65 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
+  it("applies model-issued auto stop controls in auto mode", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-mode-stop"),
+        threadId: asThreadId("thread-1"),
+        interactionMode: "auto",
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-auto-stop"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-auto-stop"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-auto-stop",
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-turn-auto-stop-assistant-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-stop"),
+      itemId: asItemId("item-turn-auto-stop-assistant"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "<t3code:auto-stop />",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.interactionMode === DEFAULT_PROVIDER_INTERACTION_MODE &&
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-turn-auto-stop-assistant" &&
+            message.text === "<t3code:auto-noop />",
+        ),
+    );
+
+    expect(thread.interactionMode).toBe(DEFAULT_PROVIDER_INTERACTION_MODE);
+    expect(thread.messages.at(-1)?.text).toBe("<t3code:auto-noop />");
+  });
+
   it("does not complete a turn early when session ready arrives before later turn activity", async () => {
     process.env.T3CODE_TURN_COMPLETION_FALLBACK_DELAY_MS = "200";
     const harness = await createHarness();
@@ -2212,6 +2271,88 @@ describe("ProviderRuntimeIngestion", () => {
       kind: "auto.defer.set",
       summary: "Auto waiting",
     });
+  });
+
+  it("applies auto stop controls for streamed assistant messages", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-mode-stop-streaming"),
+        threadId: asThreadId("thread-1"),
+        interactionMode: "auto",
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-auto-stop-streaming"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-stop-streaming"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-auto-stop-streaming",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-auto-stop-streaming"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-stop-streaming"),
+      itemId: asItemId("item-auto-stop-streaming"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "<t3code:auto-stop />",
+      },
+    });
+
+    await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-auto-stop-streaming" &&
+          message.streaming &&
+          message.text === "<t3code:auto-stop />",
+      ),
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-auto-stop-streaming"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-auto-stop-streaming"),
+      itemId: asItemId("item-auto-stop-streaming"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.interactionMode === DEFAULT_PROVIDER_INTERACTION_MODE &&
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-auto-stop-streaming" &&
+            !message.streaming &&
+            message.text === "<t3code:auto-stop />",
+        ),
+    );
+
+    expect(thread.interactionMode).toBe(DEFAULT_PROVIDER_INTERACTION_MODE);
   });
 
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {

@@ -300,6 +300,7 @@ When you receive an auto tick:
 * Inspect the current thread state before acting.
 * Only take action when there is a concrete useful next step.
 * Keep visible updates brief and outcome-focused.
+* If you have reached a clean stopping point, you may follow the tick prompt to stop auto mode.
 * If there is nothing worth doing right now, follow the tick prompt exactly.
 
 Do not claim you were asked by the user unless the user actually sent a message.

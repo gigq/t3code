@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAutoModeTickPrompt,
   AUTO_MODE_NOOP_SENTINEL,
+  AUTO_MODE_STOP_SENTINEL,
   isAutoModeHiddenControlMessage,
   isAutoModeHiddenMessage,
   isAutoModeTickPromptMessage,
@@ -12,6 +13,10 @@ import {
 describe("autoMode control messages", () => {
   it("parses the noop sentinel", () => {
     expect(parseAutoModeControlMessage(AUTO_MODE_NOOP_SENTINEL)).toEqual({ kind: "noop" });
+  });
+
+  it("parses the stop sentinel", () => {
+    expect(parseAutoModeControlMessage(AUTO_MODE_STOP_SENTINEL)).toEqual({ kind: "stop" });
   });
 
   it("parses defer presets into timestamps", () => {
@@ -41,6 +46,7 @@ describe("autoMode control messages", () => {
   it("recognizes hidden auto control messages", () => {
     expect(isAutoModeHiddenControlMessage(AUTO_MODE_NOOP_SENTINEL)).toBe(true);
     expect(isAutoModeHiddenControlMessage('<t3code:auto-defer preset="1h" />')).toBe(true);
+    expect(isAutoModeHiddenControlMessage(AUTO_MODE_STOP_SENTINEL)).toBe(true);
     expect(isAutoModeHiddenControlMessage("normal assistant text")).toBe(false);
   });
 
@@ -49,6 +55,7 @@ describe("autoMode control messages", () => {
     expect(isAutoModeTickPromptMessage(tickPrompt)).toBe(true);
     expect(isAutoModeHiddenMessage(tickPrompt)).toBe(true);
     expect(isAutoModeHiddenMessage(AUTO_MODE_NOOP_SENTINEL)).toBe(true);
+    expect(tickPrompt).toContain(AUTO_MODE_STOP_SENTINEL);
     expect(isAutoModeHiddenMessage("normal assistant text")).toBe(false);
   });
 });
