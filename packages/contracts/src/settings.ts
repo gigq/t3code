@@ -77,6 +77,7 @@ export type CopilotSettings = typeof CopilotSettings.Type;
 export const OpenCodeSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   binaryPath: makeBinaryPathSetting("opencode"),
+  serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
@@ -182,6 +183,7 @@ const CopilotSettingsPatch = Schema.Struct({
 const OpenCodeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
+  serverUrl: Schema.optionalKey(Schema.String),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 

@@ -27,14 +27,14 @@ import {
 import { OpenCodeAdapter, type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
   buildOpenCodePermissionRules,
+  connectToOpenCodeServer,
   createOpenCodeSdkClient,
   openCodeQuestionId,
   parseOpenCodeModelSlug,
-  startOpenCodeServerProcess,
   toOpenCodeFileParts,
   toOpenCodePermissionReply,
   toOpenCodeQuestionAnswers,
-  type OpenCodeServerProcess,
+  type OpenCodeServerConnection,
 } from "../opencodeRuntime.ts";
 
 const PROVIDER = "opencode" as const;
@@ -47,7 +47,7 @@ interface OpenCodeTurnSnapshot {
 interface OpenCodeSessionContext {
   session: ProviderSession;
   readonly client: OpencodeClient;
-  readonly server: OpenCodeServerProcess;
+  readonly server: OpenCodeServerConnection;
   readonly directory: string;
   readonly openCodeSessionId: string;
   readonly pendingPermissions: Map<string, PermissionRequest>;
@@ -753,7 +753,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           }
         })();
 
-        context.server.process.once("exit", (code, signal) => {
+        context.server.process?.once("exit", (code, signal) => {
           if (context.stopped) {
             return;
           }
@@ -778,6 +778,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             ),
           );
           const binaryPath = settings.providers.opencode.binaryPath;
+          const serverUrl = settings.providers.opencode.serverUrl;
           const directory = input.cwd ?? serverConfig.cwd;
           const existing = sessions.get(input.threadId);
           if (existing) {
@@ -796,7 +797,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
 
           const started = yield* Effect.tryPromise({
             try: async () => {
-              const server = await startOpenCodeServerProcess({ binaryPath });
+              const server = await connectToOpenCodeServer({ binaryPath, serverUrl });
               const client = createOpenCodeSdkClient({ baseUrl: server.url, directory });
               const openCodeSession = await client.session.create({
                 title: `T3 Code ${input.threadId}`,

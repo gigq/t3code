@@ -26,6 +26,7 @@ import {
 } from "../Utils.ts";
 import {
   createOpenCodeSdkClient,
+  type OpenCodeServerConnection,
   type OpenCodeServerProcess,
   parseOpenCodeModelSlug,
   startOpenCodeServerProcess,
@@ -184,7 +185,12 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
 
     const settings = yield* serverSettingsService.getSettings.pipe(
       Effect.map((value) => value.providers.opencode),
-      Effect.orElseSucceed(() => ({ enabled: true, binaryPath: "opencode", customModels: [] })),
+      Effect.orElseSucceed(() => ({
+        enabled: true,
+        binaryPath: "opencode",
+        serverUrl: "",
+        customModels: [],
+      })),
     );
 
     const fileParts = toOpenCodeFileParts({
@@ -193,7 +199,7 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
         resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
     });
 
-    const runAgainstServer = (server: OpenCodeServerProcess) =>
+    const runAgainstServer = (server: Pick<OpenCodeServerConnection, "url">) =>
       Effect.tryPromise({
         try: async () => {
           const client = createOpenCodeSdkClient({ baseUrl: server.url, directory: input.cwd });
@@ -235,14 +241,17 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
           }),
       });
 
-    const structuredOutput = yield* Effect.acquireUseRelease(
-      acquireSharedServer({
-        binaryPath: settings.binaryPath,
-        operation: input.operation,
-      }),
-      runAgainstServer,
-      releaseSharedServer,
-    );
+    const structuredOutput =
+      settings.serverUrl.length > 0
+        ? yield* runAgainstServer({ url: settings.serverUrl })
+        : yield* Effect.acquireUseRelease(
+            acquireSharedServer({
+              binaryPath: settings.binaryPath,
+              operation: input.operation,
+            }),
+            runAgainstServer,
+            releaseSharedServer,
+          );
 
     return yield* Schema.decodeUnknownEffect(input.outputSchemaJson)(structuredOutput).pipe(
       Effect.catchTag("SchemaError", (cause) =>

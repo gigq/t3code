@@ -93,6 +93,25 @@ const OpenCodeTextGenerationTestLayer = OpenCodeTextGenerationLive.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
+const OpenCodeTextGenerationExistingServerTestLayer = OpenCodeTextGenerationLive.pipe(
+  Layer.provideMerge(
+    ServerSettingsService.layerTest({
+      providers: {
+        opencode: {
+          binaryPath: "fake-opencode",
+          serverUrl: "http://127.0.0.1:9999",
+        },
+      },
+    }),
+  ),
+  Layer.provideMerge(
+    ServerConfig.layerTest(process.cwd(), {
+      prefix: "t3code-opencode-text-generation-existing-server-test-",
+    }),
+  ),
+  Layer.provideMerge(NodeServices.layer),
+);
+
 beforeEach(() => {
   runtimeMock.reset();
 });
@@ -167,3 +186,39 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGenerationLive", (it) => 
     }).pipe(Effect.provide(TestClock.layer())),
   );
 });
+
+it.layer(OpenCodeTextGenerationExistingServerTestLayer)(
+  "OpenCodeTextGenerationLive with configured server URL",
+  (it) => {
+    it.effect("reuses a configured OpenCode server URL without spawning or applying idle TTL", () =>
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/opencode-reuse",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+        yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/opencode-reuse",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+
+        expect(runtimeMock.state.startCalls).toEqual([]);
+        expect(runtimeMock.state.promptUrls).toEqual([
+          "http://127.0.0.1:9999",
+          "http://127.0.0.1:9999",
+        ]);
+
+        yield* advanceIdleClock;
+
+        expect(runtimeMock.state.closeCalls).toEqual([]);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+  },
+);

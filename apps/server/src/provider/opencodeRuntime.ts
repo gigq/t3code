@@ -42,6 +42,13 @@ export interface OpenCodeServerProcess {
   close(): void;
 }
 
+export interface OpenCodeServerConnection {
+  readonly url: string;
+  readonly process: ChildProcess | null;
+  readonly external: boolean;
+  close(): void;
+}
+
 export interface OpenCodeCommandResult {
   readonly stdout: string;
   readonly stderr: string;
@@ -376,6 +383,38 @@ export async function startOpenCodeServerProcess(input: {
     url,
     process: child,
     close,
+  };
+}
+
+export async function connectToOpenCodeServer(input: {
+  readonly binaryPath: string;
+  readonly serverUrl?: string | null;
+  readonly port?: number;
+  readonly hostname?: string;
+  readonly timeoutMs?: number;
+}): Promise<OpenCodeServerConnection> {
+  const serverUrl = input.serverUrl?.trim();
+  if (serverUrl) {
+    return {
+      url: serverUrl,
+      process: null,
+      external: true,
+      close() {},
+    };
+  }
+
+  const server = await startOpenCodeServerProcess({
+    binaryPath: input.binaryPath,
+    ...(input.port !== undefined ? { port: input.port } : {}),
+    ...(input.hostname !== undefined ? { hostname: input.hostname } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+  });
+
+  return {
+    url: server.url,
+    process: server.process,
+    external: false,
+    close: () => server.close(),
   };
 }
 

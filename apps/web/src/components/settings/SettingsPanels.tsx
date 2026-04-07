@@ -94,6 +94,8 @@ type InstallProviderSettings = {
   title: string;
   binaryPlaceholder: string;
   binaryDescription: ReactNode;
+  serverUrlPlaceholder?: string;
+  serverUrlDescription?: ReactNode;
   homePathKey?: "codexHomePath";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
@@ -126,6 +128,9 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     title: "OpenCode",
     binaryPlaceholder: "OpenCode binary path",
     binaryDescription: "Path to the OpenCode binary",
+    serverUrlPlaceholder: "http://127.0.0.1:4096",
+    serverUrlDescription:
+      "Optional existing OpenCode server URL. When set, T3 Code reuses it for sessions and text generation instead of spawning a local server.",
   },
 ] as const;
 
@@ -560,6 +565,8 @@ export function GeneralSettingsPanel() {
     opencode: Boolean(
       settings.providers.opencode.binaryPath !==
         DEFAULT_UNIFIED_SETTINGS.providers.opencode.binaryPath ||
+      settings.providers.opencode.serverUrl !==
+        DEFAULT_UNIFIED_SETTINGS.providers.opencode.serverUrl ||
       settings.providers.opencode.customModels.length > 0,
     ),
   });
@@ -843,10 +850,13 @@ export function GeneralSettingsPanel() {
       title: providerSettings.title,
       binaryPlaceholder: providerSettings.binaryPlaceholder,
       binaryDescription: providerSettings.binaryDescription,
+      serverUrlPlaceholder: providerSettings.serverUrlPlaceholder,
+      serverUrlDescription: providerSettings.serverUrlDescription,
       homePathKey: providerSettings.homePathKey,
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
       binaryPathValue: providerConfig.binaryPath,
+      serverUrlValue: "serverUrl" in providerConfig ? providerConfig.serverUrl : "",
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
       liveProvider,
       models,
@@ -1359,6 +1369,44 @@ export function GeneralSettingsPanel() {
                         </span>
                       </label>
                     </div>
+
+                    {providerCard.serverUrlPlaceholder ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-server-url`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {providerDisplayName} server URL
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-server-url`}
+                            className="mt-1.5"
+                            value={providerCard.serverUrlValue}
+                            onChange={(event) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  [providerCard.provider]: {
+                                    ...settings.providers[providerCard.provider],
+                                    ...(providerCard.provider === "opencode"
+                                      ? { serverUrl: event.target.value }
+                                      : {}),
+                                  },
+                                },
+                              })
+                            }
+                            placeholder={providerCard.serverUrlPlaceholder}
+                            spellCheck={false}
+                          />
+                          {providerCard.serverUrlDescription ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {providerCard.serverUrlDescription}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    ) : null}
 
                     {providerCard.homePathKey ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">

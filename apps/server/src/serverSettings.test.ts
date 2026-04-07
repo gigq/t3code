@@ -154,6 +154,10 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           claudeAgent: {
             binaryPath: "  /opt/homebrew/bin/claude  ",
           },
+          opencode: {
+            binaryPath: "  /opt/homebrew/bin/opencode  ",
+            serverUrl: "  http://127.0.0.1:4096  ",
+          },
         },
       });
 
@@ -166,6 +170,12 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/claude",
+        customModels: [],
+      });
+      assert.deepEqual(next.providers.opencode, {
+        enabled: true,
+        binaryPath: "/opt/homebrew/bin/opencode",
+        serverUrl: "http://127.0.0.1:4096",
         customModels: [],
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
@@ -223,6 +233,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
           },
+          opencode: {
+            serverUrl: "http://127.0.0.1:4096",
+          },
         },
       });
 
@@ -237,6 +250,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         providers: {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
+          },
+          opencode: {
+            serverUrl: "http://127.0.0.1:4096",
           },
         },
       });
