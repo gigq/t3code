@@ -102,5 +102,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     await expect.element(page.getByText("OpenCode server URL")).toBeInTheDocument();
     await expect.element(page.getByPlaceholder("http://127.0.0.1:4096")).toBeInTheDocument();
+    await expect.element(page.getByText("OpenCode server password")).toBeInTheDocument();
+    await expect.element(page.getByPlaceholder("Server password")).toBeInTheDocument();
   });
 });

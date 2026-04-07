@@ -49,6 +49,10 @@ export interface OpenCodeServerConnection {
   close(): void;
 }
 
+function buildOpenCodeBasicAuthorizationHeader(password: string): string {
+  return `Basic ${Buffer.from(`opencode:${password}`, "utf8").toString("base64")}`;
+}
+
 export interface OpenCodeCommandResult {
   readonly stdout: string;
   readonly stderr: string;
@@ -452,10 +456,18 @@ export async function runOpenCodeCommand(input: {
 export function createOpenCodeSdkClient(input: {
   readonly baseUrl: string;
   readonly directory: string;
+  readonly serverPassword?: string;
 }): OpencodeClient {
   return createOpencodeClient({
     baseUrl: input.baseUrl,
     directory: input.directory,
+    ...(input.serverPassword
+      ? {
+          headers: {
+            Authorization: buildOpenCodeBasicAuthorizationHeader(input.serverPassword),
+          },
+        }
+      : {}),
     throwOnError: true,
   });
 }

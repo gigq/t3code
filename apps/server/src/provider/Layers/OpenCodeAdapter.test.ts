@@ -18,6 +18,7 @@ const runtimeMock = vi.hoisted(() => {
   const state = {
     startCalls: [] as string[],
     sessionCreateUrls: [] as string[],
+    authHeaders: [] as Array<string | null>,
     abortCalls: [] as string[],
   };
 
@@ -26,6 +27,7 @@ const runtimeMock = vi.hoisted(() => {
     reset() {
       state.startCalls.length = 0;
       state.sessionCreateUrls.length = 0;
+      state.authHeaders.length = 0;
       state.abortCalls.length = 0;
     },
   };
@@ -47,22 +49,27 @@ vi.mock("../opencodeRuntime.ts", async () => {
         close() {},
       };
     }),
-    createOpenCodeSdkClient: vi.fn(({ baseUrl }: { baseUrl: string }) => ({
-      session: {
-        create: vi.fn(async () => {
-          runtimeMock.state.sessionCreateUrls.push(baseUrl);
-          return { data: { id: `${baseUrl}/session` } };
-        }),
-        abort: vi.fn(async ({ sessionID }: { sessionID: string }) => {
-          runtimeMock.state.abortCalls.push(sessionID);
-        }),
-      },
-      event: {
-        subscribe: vi.fn(async () => ({
-          stream: (async function* () {})(),
-        })),
-      },
-    })),
+    createOpenCodeSdkClient: vi.fn(
+      ({ baseUrl, serverPassword }: { baseUrl: string; serverPassword?: string }) => ({
+        session: {
+          create: vi.fn(async () => {
+            runtimeMock.state.sessionCreateUrls.push(baseUrl);
+            runtimeMock.state.authHeaders.push(
+              serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
+            );
+            return { data: { id: `${baseUrl}/session` } };
+          }),
+          abort: vi.fn(async ({ sessionID }: { sessionID: string }) => {
+            runtimeMock.state.abortCalls.push(sessionID);
+          }),
+        },
+        event: {
+          subscribe: vi.fn(async () => ({
+            stream: (async function* () {})(),
+          })),
+        },
+      }),
+    ),
   };
 });
 
@@ -83,6 +90,7 @@ const OpenCodeAdapterTestLayer = makeOpenCodeAdapterLive().pipe(
         opencode: {
           binaryPath: "fake-opencode",
           serverUrl: "http://127.0.0.1:9999",
+          serverPassword: "secret-password",
         },
       },
     }),
@@ -110,6 +118,9 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       assert.equal(session.threadId, "thread-opencode");
       assert.deepEqual(runtimeMock.state.startCalls, []);
       assert.deepEqual(runtimeMock.state.sessionCreateUrls, ["http://127.0.0.1:9999"]);
+      assert.deepEqual(runtimeMock.state.authHeaders, [
+        `Basic ${btoa("opencode:secret-password")}`,
+      ]);
     }),
   );
 

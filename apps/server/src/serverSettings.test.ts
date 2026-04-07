@@ -157,6 +157,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           opencode: {
             binaryPath: "  /opt/homebrew/bin/opencode  ",
             serverUrl: "  http://127.0.0.1:4096  ",
+            serverPassword: "  secret-password  ",
           },
         },
       });
@@ -176,6 +177,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/opencode",
         serverUrl: "http://127.0.0.1:4096",
+        serverPassword: "secret-password",
         customModels: [],
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
@@ -235,6 +237,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
           opencode: {
             serverUrl: "http://127.0.0.1:4096",
+            serverPassword: "secret-password",
           },
         },
       });
@@ -253,6 +256,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
           opencode: {
             serverUrl: "http://127.0.0.1:4096",
+            serverPassword: "secret-password",
           },
         },
       });

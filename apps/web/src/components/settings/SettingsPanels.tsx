@@ -96,6 +96,8 @@ type InstallProviderSettings = {
   binaryDescription: ReactNode;
   serverUrlPlaceholder?: string;
   serverUrlDescription?: ReactNode;
+  serverPasswordPlaceholder?: string;
+  serverPasswordDescription?: ReactNode;
   homePathKey?: "codexHomePath";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
@@ -129,8 +131,10 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     binaryPlaceholder: "OpenCode binary path",
     binaryDescription: "Path to the OpenCode binary",
     serverUrlPlaceholder: "http://127.0.0.1:4096",
-    serverUrlDescription:
-      "Optional existing OpenCode server URL. When set, T3 Code reuses it for sessions and text generation instead of spawning a local server.",
+    serverUrlDescription: "Leave blank to let T3 Code spawn the server when needed",
+    serverPasswordPlaceholder: "Server password (optional)",
+    serverPasswordDescription:
+      "If your OpenCode server requires authentication, enter the password here. NOTE: Stored in plain text on disk",
   },
 ] as const;
 
@@ -567,6 +571,8 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.opencode.binaryPath ||
       settings.providers.opencode.serverUrl !==
         DEFAULT_UNIFIED_SETTINGS.providers.opencode.serverUrl ||
+      settings.providers.opencode.serverPassword !==
+        DEFAULT_UNIFIED_SETTINGS.providers.opencode.serverPassword ||
       settings.providers.opencode.customModels.length > 0,
     ),
   });
@@ -852,11 +858,14 @@ export function GeneralSettingsPanel() {
       binaryDescription: providerSettings.binaryDescription,
       serverUrlPlaceholder: providerSettings.serverUrlPlaceholder,
       serverUrlDescription: providerSettings.serverUrlDescription,
+      serverPasswordPlaceholder: providerSettings.serverPasswordPlaceholder,
+      serverPasswordDescription: providerSettings.serverPasswordDescription,
       homePathKey: providerSettings.homePathKey,
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
       binaryPathValue: providerConfig.binaryPath,
       serverUrlValue: "serverUrl" in providerConfig ? providerConfig.serverUrl : "",
+      serverPasswordValue: "serverPassword" in providerConfig ? providerConfig.serverPassword : "",
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
       liveProvider,
       models,
@@ -1402,6 +1411,46 @@ export function GeneralSettingsPanel() {
                           {providerCard.serverUrlDescription ? (
                             <span className="mt-1 block text-xs text-muted-foreground">
                               {providerCard.serverUrlDescription}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {providerCard.serverPasswordPlaceholder ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-server-password`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {providerDisplayName} server password
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-server-password`}
+                            className="mt-1.5"
+                            type="password"
+                            autoComplete="current-password"
+                            value={providerCard.serverPasswordValue}
+                            onChange={(event) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  [providerCard.provider]: {
+                                    ...settings.providers[providerCard.provider],
+                                    ...(providerCard.provider === "opencode"
+                                      ? { serverPassword: event.target.value }
+                                      : {}),
+                                  },
+                                },
+                              })
+                            }
+                            placeholder={providerCard.serverPasswordPlaceholder}
+                            spellCheck={false}
+                          />
+                          {providerCard.serverPasswordDescription ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {providerCard.serverPasswordDescription}
                             </span>
                           ) : null}
                         </label>

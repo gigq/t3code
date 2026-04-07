@@ -779,6 +779,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           );
           const binaryPath = settings.providers.opencode.binaryPath;
           const serverUrl = settings.providers.opencode.serverUrl;
+          const serverPassword = settings.providers.opencode.serverPassword;
           const directory = input.cwd ?? serverConfig.cwd;
           const existing = sessions.get(input.threadId);
           if (existing) {
@@ -798,7 +799,11 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           const started = yield* Effect.tryPromise({
             try: async () => {
               const server = await connectToOpenCodeServer({ binaryPath, serverUrl });
-              const client = createOpenCodeSdkClient({ baseUrl: server.url, directory });
+              const client = createOpenCodeSdkClient({
+                baseUrl: server.url,
+                directory,
+                ...(server.external && serverPassword ? { serverPassword } : {}),
+              });
               const openCodeSession = await client.session.create({
                 title: `T3 Code ${input.threadId}`,
                 permission: buildOpenCodePermissionRules(input.runtimeMode),

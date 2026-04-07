@@ -189,6 +189,7 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
         enabled: true,
         binaryPath: "opencode",
         serverUrl: "",
+        serverPassword: "",
         customModels: [],
       })),
     );
@@ -202,7 +203,13 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
     const runAgainstServer = (server: Pick<OpenCodeServerConnection, "url">) =>
       Effect.tryPromise({
         try: async () => {
-          const client = createOpenCodeSdkClient({ baseUrl: server.url, directory: input.cwd });
+          const client = createOpenCodeSdkClient({
+            baseUrl: server.url,
+            directory: input.cwd,
+            ...(settings.serverUrl.length > 0 && settings.serverPassword
+              ? { serverPassword: settings.serverPassword }
+              : {}),
+          });
           const session = await client.session.create({
             title: `T3 Code ${input.operation}`,
             permission: [{ permission: "*", pattern: "*", action: "deny" }],

@@ -109,7 +109,13 @@ function checkOpenCodeProviderStatus(input: {
         ),
         (server) =>
           Effect.tryPromise(async () => {
-            const client = createOpenCodeSdkClient({ baseUrl: server.url, directory: input.cwd });
+            const client = createOpenCodeSdkClient({
+              baseUrl: server.url,
+              directory: input.cwd,
+              ...(isExternalServer && input.settings.serverPassword
+                ? { serverPassword: input.settings.serverPassword }
+                : {}),
+            });
             return await loadOpenCodeInventory(client);
           }),
         (server) => Effect.sync(() => server.close()),

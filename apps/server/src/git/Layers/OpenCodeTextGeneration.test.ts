@@ -15,6 +15,7 @@ const runtimeMock = vi.hoisted(() => {
   const state = {
     startCalls: [] as string[],
     promptUrls: [] as string[],
+    authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
   };
 
@@ -23,6 +24,7 @@ const runtimeMock = vi.hoisted(() => {
     reset() {
       state.startCalls.length = 0;
       state.promptUrls.length = 0;
+      state.authHeaders.length = 0;
       state.closeCalls.length = 0;
     },
   };
@@ -47,24 +49,29 @@ vi.mock("../../provider/opencodeRuntime.ts", async () => {
         },
       };
     }),
-    createOpenCodeSdkClient: vi.fn(({ baseUrl }: { baseUrl: string }) => ({
-      session: {
-        create: vi.fn(async () => ({ data: { id: `${baseUrl}/session` } })),
-        prompt: vi.fn(async () => {
-          runtimeMock.state.promptUrls.push(baseUrl);
-          return {
-            data: {
-              info: {
-                structured: {
-                  subject: "Improve OpenCode reuse",
-                  body: "Reuse one server for the full action.",
+    createOpenCodeSdkClient: vi.fn(
+      ({ baseUrl, serverPassword }: { baseUrl: string; serverPassword?: string }) => ({
+        session: {
+          create: vi.fn(async () => ({ data: { id: `${baseUrl}/session` } })),
+          prompt: vi.fn(async () => {
+            runtimeMock.state.promptUrls.push(baseUrl);
+            runtimeMock.state.authHeaders.push(
+              serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
+            );
+            return {
+              data: {
+                info: {
+                  structured: {
+                    subject: "Improve OpenCode reuse",
+                    body: "Reuse one server for the full action.",
+                  },
                 },
               },
-            },
-          };
-        }),
-      },
-    })),
+            };
+          }),
+        },
+      }),
+    ),
   };
 });
 
@@ -100,6 +107,7 @@ const OpenCodeTextGenerationExistingServerTestLayer = OpenCodeTextGenerationLive
         opencode: {
           binaryPath: "fake-opencode",
           serverUrl: "http://127.0.0.1:9999",
+          serverPassword: "secret-password",
         },
       },
     }),
@@ -213,6 +221,10 @@ it.layer(OpenCodeTextGenerationExistingServerTestLayer)(
         expect(runtimeMock.state.promptUrls).toEqual([
           "http://127.0.0.1:9999",
           "http://127.0.0.1:9999",
+        ]);
+        expect(runtimeMock.state.authHeaders).toEqual([
+          `Basic ${btoa("opencode:secret-password")}`,
+          `Basic ${btoa("opencode:secret-password")}`,
         ]);
 
         yield* advanceIdleClock;
