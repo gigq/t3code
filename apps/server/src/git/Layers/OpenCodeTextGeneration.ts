@@ -1,4 +1,5 @@
-import { Effect, Layer, Schema } from "effect";
+import { Duration, Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
+import * as Semaphore from "effect/Semaphore";
 
 import {
   TextGenerationError,
@@ -25,14 +26,141 @@ import {
 } from "../Utils.ts";
 import {
   createOpenCodeSdkClient,
+  type OpenCodeServerProcess,
   parseOpenCodeModelSlug,
   startOpenCodeServerProcess,
   toOpenCodeFileParts,
 } from "../../provider/opencodeRuntime.ts";
 
+const OPENCODE_TEXT_GENERATION_IDLE_TTL_MS = 30_000;
+
+interface SharedOpenCodeTextGenerationServerState {
+  server: OpenCodeServerProcess | null;
+  binaryPath: string | null;
+  activeRequests: number;
+  idleCloseFiber: Fiber.Fiber<void, never> | null;
+}
+
 const makeOpenCodeTextGeneration = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const serverSettingsService = yield* ServerSettingsService;
+  const idleFiberScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+    Scope.close(scope, Exit.void),
+  );
+  const sharedServerMutex = yield* Semaphore.make(1);
+  const sharedServerState: SharedOpenCodeTextGenerationServerState = {
+    server: null,
+    binaryPath: null,
+    activeRequests: 0,
+    idleCloseFiber: null,
+  };
+
+  const closeSharedServer = (server: OpenCodeServerProcess) => {
+    if (sharedServerState.server === server) {
+      sharedServerState.server = null;
+      sharedServerState.binaryPath = null;
+    }
+    server.close();
+  };
+
+  const cancelIdleCloseFiber = Effect.fn("cancelIdleCloseFiber")(function* () {
+    const idleCloseFiber = sharedServerState.idleCloseFiber;
+    sharedServerState.idleCloseFiber = null;
+    if (idleCloseFiber !== null) {
+      yield* Fiber.interrupt(idleCloseFiber).pipe(Effect.ignore);
+    }
+  });
+
+  const scheduleIdleClose = Effect.fn("scheduleIdleClose")(function* (
+    server: OpenCodeServerProcess,
+  ) {
+    yield* cancelIdleCloseFiber();
+    const fiber = yield* Effect.sleep(Duration.millis(OPENCODE_TEXT_GENERATION_IDLE_TTL_MS)).pipe(
+      Effect.andThen(
+        sharedServerMutex.withPermit(
+          Effect.sync(() => {
+            if (sharedServerState.server !== server || sharedServerState.activeRequests > 0) {
+              return;
+            }
+            sharedServerState.idleCloseFiber = null;
+            closeSharedServer(server);
+          }),
+        ),
+      ),
+      Effect.forkIn(idleFiberScope),
+    );
+    sharedServerState.idleCloseFiber = fiber;
+  });
+
+  const acquireSharedServer = (input: {
+    readonly binaryPath: string;
+    readonly operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle";
+  }) =>
+    sharedServerMutex.withPermit(
+      Effect.gen(function* () {
+        yield* cancelIdleCloseFiber();
+
+        const existingServer = sharedServerState.server;
+        if (existingServer !== null) {
+          if (
+            sharedServerState.binaryPath !== input.binaryPath &&
+            sharedServerState.activeRequests === 0
+          ) {
+            closeSharedServer(existingServer);
+          } else {
+            sharedServerState.activeRequests += 1;
+            return existingServer;
+          }
+        }
+
+        const server = yield* Effect.tryPromise({
+          try: () => startOpenCodeServerProcess({ binaryPath: input.binaryPath }),
+          catch: (cause) =>
+            new TextGenerationError({
+              operation: input.operation,
+              detail: cause instanceof Error ? cause.message : "Failed to start OpenCode server.",
+              cause,
+            }),
+        });
+
+        sharedServerState.server = server;
+        sharedServerState.binaryPath = input.binaryPath;
+        sharedServerState.activeRequests = 1;
+        return server;
+      }),
+    );
+
+  const releaseSharedServer = (server: OpenCodeServerProcess) =>
+    sharedServerMutex.withPermit(
+      Effect.gen(function* () {
+        if (sharedServerState.server !== server) {
+          return;
+        }
+        sharedServerState.activeRequests = Math.max(0, sharedServerState.activeRequests - 1);
+        if (sharedServerState.activeRequests === 0) {
+          yield* scheduleIdleClose(server);
+        }
+      }),
+    );
+
+  yield* Effect.addFinalizer(() =>
+    sharedServerMutex.withPermit(
+      Effect.gen(function* () {
+        yield* cancelIdleCloseFiber();
+        const server = sharedServerState.server;
+        sharedServerState.server = null;
+        sharedServerState.binaryPath = null;
+        sharedServerState.activeRequests = 0;
+        if (server !== null) {
+          server.close();
+        }
+      }),
+    ),
+  );
 
   const runOpenCodeJson = Effect.fn("runOpenCodeJson")(function* <S extends Schema.Top>(input: {
     readonly operation:
@@ -65,58 +193,55 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
         resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
     });
 
-    const structuredOutput = yield* Effect.acquireUseRelease(
+    const runAgainstServer = (server: OpenCodeServerProcess) =>
       Effect.tryPromise({
-        try: () => startOpenCodeServerProcess({ binaryPath: settings.binaryPath }),
+        try: async () => {
+          const client = createOpenCodeSdkClient({ baseUrl: server.url, directory: input.cwd });
+          const session = await client.session.create({
+            title: `T3 Code ${input.operation}`,
+            permission: [{ permission: "*", pattern: "*", action: "deny" }],
+          });
+          if (!session.data) {
+            throw new Error("OpenCode session.create returned no session payload.");
+          }
+
+          const result = await client.session.prompt({
+            sessionID: session.data.id,
+            model: parsedModel,
+            ...(input.modelSelection.options?.agent
+              ? { agent: input.modelSelection.options.agent }
+              : {}),
+            ...(input.modelSelection.options?.variant
+              ? { variant: input.modelSelection.options.variant }
+              : {}),
+            format: {
+              type: "json_schema",
+              schema: toJsonSchemaObject(input.outputSchemaJson) as Record<string, unknown>,
+            },
+            parts: [{ type: "text", text: input.prompt }, ...fileParts],
+          });
+          const structured = result.data?.info.structured;
+          if (structured === undefined) {
+            throw new Error("OpenCode returned no structured output.");
+          }
+          return structured;
+        },
         catch: (cause) =>
           new TextGenerationError({
             operation: input.operation,
-            detail: cause instanceof Error ? cause.message : "Failed to start OpenCode server.",
+            detail:
+              cause instanceof Error ? cause.message : "OpenCode text generation request failed.",
             cause,
           }),
-      }),
-      (server) =>
-        Effect.tryPromise({
-          try: async () => {
-            const client = createOpenCodeSdkClient({ baseUrl: server.url, directory: input.cwd });
-            const session = await client.session.create({
-              title: `T3 Code ${input.operation}`,
-              permission: [{ permission: "*", pattern: "*", action: "deny" }],
-            });
-            if (!session.data) {
-              throw new Error("OpenCode session.create returned no session payload.");
-            }
+      });
 
-            const result = await client.session.prompt({
-              sessionID: session.data.id,
-              model: parsedModel,
-              ...(input.modelSelection.options?.agent
-                ? { agent: input.modelSelection.options.agent }
-                : {}),
-              ...(input.modelSelection.options?.variant
-                ? { variant: input.modelSelection.options.variant }
-                : {}),
-              format: {
-                type: "json_schema",
-                schema: toJsonSchemaObject(input.outputSchemaJson) as Record<string, unknown>,
-              },
-              parts: [{ type: "text", text: input.prompt }, ...fileParts],
-            });
-            const structured = result.data?.info.structured;
-            if (structured === undefined) {
-              throw new Error("OpenCode returned no structured output.");
-            }
-            return structured;
-          },
-          catch: (cause) =>
-            new TextGenerationError({
-              operation: input.operation,
-              detail:
-                cause instanceof Error ? cause.message : "OpenCode text generation request failed.",
-              cause,
-            }),
-        }),
-      (server) => Effect.sync(() => server.close()),
+    const structuredOutput = yield* Effect.acquireUseRelease(
+      acquireSharedServer({
+        binaryPath: settings.binaryPath,
+        operation: input.operation,
+      }),
+      runAgainstServer,
+      releaseSharedServer,
     );
 
     return yield* Schema.decodeUnknownEffect(input.outputSchemaJson)(structuredOutput).pipe(
