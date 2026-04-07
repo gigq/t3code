@@ -19,6 +19,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   autoDeferUntil?: string | null;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
+  showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   onSelectInteractionMode: (mode: ProviderInteractionMode) => void;
   onSetAutoDeferUntil?: (value: AutoModeDeferPreset | null) => void;
@@ -46,43 +47,47 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
           </>
         ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-        <MenuRadioGroup
-          value={props.interactionMode}
-          onValueChange={(value) => {
-            if (!value || value === props.interactionMode) return;
-            props.onSelectInteractionMode(value as ProviderInteractionMode);
-          }}
-        >
-          <MenuRadioItem value="default">Chat</MenuRadioItem>
-          <MenuRadioItem value="auto">Auto</MenuRadioItem>
-          <MenuRadioItem value="plan">Plan</MenuRadioItem>
-        </MenuRadioGroup>
-        {props.interactionMode === "auto" && props.onSetAutoDeferUntil ? (
+        {props.showInteractionModeToggle ? (
           <>
-            <MenuDivider />
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Wait</div>
-            <MenuItem onClick={() => props.onSetAutoDeferUntil?.("15m")}>
-              <Clock3Icon className="size-4 shrink-0" />
-              Defer 15m
-            </MenuItem>
-            <MenuItem onClick={() => props.onSetAutoDeferUntil?.("1h")}>
-              <Clock3Icon className="size-4 shrink-0" />
-              Defer 1h
-            </MenuItem>
-            <MenuItem onClick={() => props.onSetAutoDeferUntil?.("tomorrow-8am")}>
-              <Clock3Icon className="size-4 shrink-0" />
-              Defer until tomorrow 8am
-            </MenuItem>
-            {isAutoModeDeferred(props.autoDeferUntil) ? (
-              <MenuItem onClick={() => props.onSetAutoDeferUntil?.(null)}>
-                <Clock3Icon className="size-4 shrink-0" />
-                Resume auto now
-              </MenuItem>
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
+            <MenuRadioGroup
+              value={props.interactionMode}
+              onValueChange={(value) => {
+                if (!value || value === props.interactionMode) return;
+                props.onSelectInteractionMode(value as ProviderInteractionMode);
+              }}
+            >
+              <MenuRadioItem value="default">Chat</MenuRadioItem>
+              <MenuRadioItem value="auto">Auto</MenuRadioItem>
+              <MenuRadioItem value="plan">Plan</MenuRadioItem>
+            </MenuRadioGroup>
+            {props.interactionMode === "auto" && props.onSetAutoDeferUntil ? (
+              <>
+                <MenuDivider />
+                <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Wait</div>
+                <MenuItem onClick={() => props.onSetAutoDeferUntil?.("15m")}>
+                  <Clock3Icon className="size-4 shrink-0" />
+                  Defer 15m
+                </MenuItem>
+                <MenuItem onClick={() => props.onSetAutoDeferUntil?.("1h")}>
+                  <Clock3Icon className="size-4 shrink-0" />
+                  Defer 1h
+                </MenuItem>
+                <MenuItem onClick={() => props.onSetAutoDeferUntil?.("tomorrow-8am")}>
+                  <Clock3Icon className="size-4 shrink-0" />
+                  Defer until tomorrow 8am
+                </MenuItem>
+                {isAutoModeDeferred(props.autoDeferUntil) ? (
+                  <MenuItem onClick={() => props.onSetAutoDeferUntil?.(null)}>
+                    <Clock3Icon className="size-4 shrink-0" />
+                    Resume auto now
+                  </MenuItem>
+                ) : null}
+              </>
             ) : null}
+            <MenuDivider />
           </>
         ) : null}
-        <MenuDivider />
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
         <MenuRadioGroup
           value={props.runtimeMode}

@@ -35,6 +35,12 @@ import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 
 type ProviderOptions = ProviderModelOptions[ProviderKind];
+type NamedOption = {
+  value: string;
+  label: string;
+  isDefault?: boolean | undefined;
+};
+
 type TraitsPersistence =
   | {
       threadId: ThreadId;
@@ -68,13 +74,16 @@ function getRawAgent(modelOptions: ProviderOptions | null | undefined): string |
 }
 
 function resolveNamedOption(
-  options: ReadonlyArray<{ value: string; isDefault?: boolean | undefined }>,
+  options: ReadonlyArray<NamedOption>,
   raw: string | null,
-): string | null {
-  if (raw && options.some((option) => option.value === raw)) {
-    return raw;
+): NamedOption | null {
+  if (raw) {
+    const matchingOption = options.find((option) => option.value === raw);
+    if (matchingOption) {
+      return matchingOption;
+    }
   }
-  return options.find((option) => option.isDefault)?.value ?? null;
+  return options.find((option) => option.isDefault) ?? null;
 }
 
 function getRawContextWindow(
@@ -132,7 +141,7 @@ function getSelectedTraits(
   const rawEffort = getRawEffort(provider, modelOptions);
   const effort =
     provider === "opencode"
-      ? resolveNamedOption(effortLevels, rawEffort)
+      ? (resolveNamedOption(effortLevels, rawEffort)?.value ?? null)
       : (resolveEffort(caps, rawEffort) ?? null);
 
   // Thinking toggle (only for models that support it)
@@ -165,7 +174,7 @@ function getSelectedTraits(
     ultrathinkPromptControlled && isClaudeUltrathinkPrompt(prompt.replace(/^Ultrathink:\s*/i, ""));
 
   const agentOptions = caps.agentOptions ?? [];
-  const selectedAgent =
+  const selectedAgentOption =
     provider === "opencode" ? resolveNamedOption(agentOptions, getRawAgent(modelOptions)) : null;
 
   return {
@@ -180,7 +189,8 @@ function getSelectedTraits(
     ultrathinkPromptControlled,
     ultrathinkInBodyText,
     agentOptions,
-    selectedAgent,
+    selectedAgent: selectedAgentOption?.value ?? null,
+    selectedAgentLabel: selectedAgentOption?.label ?? null,
   };
 }
 
@@ -422,7 +432,7 @@ export const TraitsPicker = memo(function TraitsPicker({
     contextWindow,
     defaultContextWindow,
     ultrathinkPromptControlled,
-    selectedAgent,
+    selectedAgentLabel,
   } = getSelectedTraits(provider, models, model, prompt, modelOptions, allowPromptInjectedEffort);
 
   const effortLabel = effort
@@ -442,7 +452,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           : `Thinking ${thinkingEnabled ? "On" : "Off"}`,
     ...(caps.supportsFastMode && fastModeEnabled ? ["Fast"] : []),
     ...(contextWindowLabel ? [contextWindowLabel] : []),
-    ...(selectedAgent ? [selectedAgent] : []),
+    ...(selectedAgentLabel ? [selectedAgentLabel] : []),
   ]
     .filter(Boolean)
     .join(" · ");

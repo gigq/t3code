@@ -180,6 +180,7 @@ import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPane
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
 import {
+  getComposerProviderControls,
   getComposerProviderState,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
@@ -1147,6 +1148,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         modelOptions: composerModelOptions,
       }),
     [composerModelOptions, prompt, selectedModel, selectedProvider, selectedProviderModels],
+  );
+  const composerProviderControls = useMemo(
+    () => getComposerProviderControls(selectedProvider),
+    [selectedProvider],
   );
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
@@ -4566,6 +4571,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             autoDeferUntil={autoDeferUntil}
                             planSidebarOpen={planSidebarOpen}
                             runtimeMode={runtimeMode}
+                            showInteractionModeToggle={
+                              composerProviderControls.showInteractionModeToggle
+                            }
                             traitsMenuContent={providerTraitsMenuContent}
                             onSelectInteractionMode={handleInteractionModeChange}
                             {...(isServerThread
@@ -4594,29 +4602,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="mx-0.5 hidden h-4 sm:block"
                             />
 
-                            <Button
-                              variant="ghost"
-                              className={cn(
-                                "shrink-0 whitespace-nowrap px-2 sm:px-3",
-                                autoModeDeferred
-                                  ? "bg-amber-100/70 text-amber-900 hover:bg-amber-200/80 hover:text-amber-950"
-                                  : "text-muted-foreground/70 hover:text-foreground/80",
-                              )}
-                              size="sm"
-                              type="button"
-                              onClick={cycleInteractionMode}
-                              title={interactionModeTitle(interactionMode, autoDeferUntil)}
-                            >
-                              <BotIcon />
-                              <span className="sr-only sm:not-sr-only">
-                                {interactionModeLabel(interactionMode, autoDeferUntil)}
-                              </span>
-                            </Button>
+                            {composerProviderControls.showInteractionModeToggle ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  className={cn(
+                                    "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                                    autoModeDeferred
+                                      ? "bg-amber-100/70 text-amber-900 hover:bg-amber-200/80 hover:text-amber-950"
+                                      : "text-muted-foreground/70 hover:text-foreground/80",
+                                  )}
+                                  size="sm"
+                                  type="button"
+                                  onClick={cycleInteractionMode}
+                                  title={interactionModeTitle(interactionMode, autoDeferUntil)}
+                                >
+                                  <BotIcon />
+                                  <span className="sr-only sm:not-sr-only">
+                                    {interactionModeLabel(interactionMode, autoDeferUntil)}
+                                  </span>
+                                </Button>
 
-                            <Separator
-                              orientation="vertical"
-                              className="mx-0.5 hidden h-4 sm:block"
-                            />
+                                <Separator
+                                  orientation="vertical"
+                                  className="mx-0.5 hidden h-4 sm:block"
+                                />
+                              </>
+                            ) : null}
 
                             <Button
                               variant="ghost"
