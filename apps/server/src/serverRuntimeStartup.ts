@@ -59,6 +59,8 @@ interface QueuedCommand {
 
 type CommandReadinessState = "pending" | "ready" | ServerRuntimeStartupError;
 
+const serverInstanceId = crypto.randomUUID();
+
 interface CommandGate {
   readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
   readonly signalCommandReady: Effect.Effect<void>;
@@ -223,6 +225,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
   return {
     cwd: serverConfig.cwd,
     projectName,
+    serverInstanceId,
     ...(bootstrapProjectId ? { bootstrapProjectId } : {}),
     ...(bootstrapThreadId ? { bootstrapThreadId } : {}),
   } as const;

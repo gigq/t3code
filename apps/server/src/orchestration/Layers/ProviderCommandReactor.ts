@@ -23,6 +23,7 @@ import {
   isAutoModeDeferred,
   parseAutoModeDeferUntilMs,
 } from "@t3tools/shared/autoMode";
+import { buildReconnectCheckInPrompt } from "@t3tools/shared/reconnectCheckIn";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -51,7 +52,8 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
-      | "thread.session-stop-requested";
+      | "thread.session-stop-requested"
+      | "thread.reconnect-checkin-requested";
   }
 >;
 
@@ -948,6 +950,36 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const processReconnectCheckInRequested = Effect.fn("processReconnectCheckInRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.reconnect-checkin-requested" }>,
+  ) {
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread) {
+      return;
+    }
+    if (thread.interactionMode === "auto") {
+      return;
+    }
+
+    yield* sendTurnForThread({
+      threadId: event.payload.threadId,
+      messageText: buildReconnectCheckInPrompt(event.payload.createdAt),
+      interactionMode: thread.interactionMode,
+      createdAt: event.payload.createdAt,
+    }).pipe(
+      Effect.catchCause((cause) =>
+        appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Reconnect follow-up turn failed",
+          detail: Cause.pretty(cause),
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        }),
+      ),
+    );
+  });
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -1014,6 +1046,9 @@ const make = Effect.gen(function* () {
         yield* clearAutoWake(event.payload.threadId, event.type);
         yield* processSessionStopRequested(event);
         return;
+      case "thread.reconnect-checkin-requested":
+        yield* processReconnectCheckInRequested(event);
+        return;
     }
   });
 
@@ -1045,7 +1080,8 @@ const make = Effect.gen(function* () {
           event.type === "thread.turn-interrupt-requested" ||
           event.type === "thread.approval-response-requested" ||
           event.type === "thread.user-input-response-requested" ||
-          event.type === "thread.session-stop-requested"
+          event.type === "thread.session-stop-requested" ||
+          event.type === "thread.reconnect-checkin-requested"
         ) {
           return worker.enqueue(event);
         }

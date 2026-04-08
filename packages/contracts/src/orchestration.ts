@@ -510,6 +510,13 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadReconnectCheckInCommand = Schema.Struct({
+  type: Schema.Literal("thread.reconnect-checkin"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const ThreadProposedPlanDismissCommand = Schema.Struct({
   type: Schema.Literal("thread.proposed-plan.dismiss"),
   commandId: CommandId,
@@ -536,6 +543,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadReconnectCheckInCommand,
   ThreadProposedPlanDismissCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -559,6 +567,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadReconnectCheckInCommand,
   ThreadProposedPlanDismissCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
@@ -697,6 +706,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
+  "thread.reconnect-checkin-requested",
   "thread.session-set",
   "thread.proposed-plan-upserted",
   "thread.turn-completed",
@@ -862,6 +872,11 @@ export const ThreadSessionStopRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadReconnectCheckInRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 export const ThreadSessionSetPayload = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
@@ -1017,6 +1032,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.session-stop-requested"),
     payload: ThreadSessionStopRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.reconnect-checkin-requested"),
+    payload: ThreadReconnectCheckInRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

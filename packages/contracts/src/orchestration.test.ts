@@ -236,6 +236,36 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
   }),
 );
 
+it.effect("decodes thread.reconnect-checkin commands and events", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "thread.reconnect-checkin",
+      commandId: "cmd-reconnect-checkin",
+      threadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(command.type, "thread.reconnect-checkin");
+
+    const event = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "event-1",
+      causationEventId: null,
+      correlationId: "cmd-reconnect-checkin",
+      aggregateId: "thread-1",
+      aggregateKind: "thread",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: "cmd-reconnect-checkin",
+      metadata: {},
+      type: "thread.reconnect-checkin-requested",
+      payload: {
+        threadId: "thread-1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    assert.strictEqual(event.type, "thread.reconnect-checkin-requested");
+  }),
+);
+
 it.effect("decodes thread.created runtime mode for historical events", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadCreatedPayload({

@@ -1,7 +1,17 @@
+import { type ThreadId } from "@t3tools/contracts";
 import { AlertTriangle, CloudOff, LoaderCircle, RotateCw } from "lucide-react";
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APP_DISPLAY_NAME } from "../branding";
+import { newCommandId } from "../lib/utils";
+import { readNativeApi } from "../nativeApi";
+import {
+  captureReconnectCheckInThreadIds,
+  getReconnectCheckInDisposition,
+  readPersistedReconnectCheckInThreadIds,
+  shouldScheduleReconnectCheckIn,
+  writePersistedReconnectCheckInThreadIds,
+} from "../reconnectCheckIn";
 import { type SlowRpcAckRequest, useSlowRpcAckRequests } from "../rpc/requestLatencyState";
 import { useServerConfig } from "../rpc/serverState";
 import {
@@ -14,12 +24,14 @@ import {
   useWsConnectionStatus,
   WS_RECONNECT_MAX_ATTEMPTS,
 } from "../rpc/wsConnectionState";
+import { useStore } from "../store";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
 export const SLOW_RPC_ACK_TOAST_DISMISS_AFTER_VISIBLE_MS = 5_000;
+const RECONNECT_CHECK_IN_DELAY_MS = 1_500;
 type WsAutoReconnectTrigger = "focus" | "online";
 
 const connectionTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -90,6 +102,10 @@ function describeSlowRpcAckToast(requests: ReadonlyArray<SlowRpcAckRequest>): Re
   const thresholdSeconds = Math.round((requests[0]?.thresholdMs ?? 0) / 1000);
 
   return `${count} request${count === 1 ? "" : "s"} waiting longer than ${thresholdSeconds}s.`;
+}
+
+function getReconnectCheckInStorage(): Storage | null {
+  return typeof window === "undefined" ? null : window.sessionStorage;
 }
 
 export function shouldAutoReconnect(
@@ -267,6 +283,8 @@ export function WebSocketConnectionCoordinator() {
   const status = useWsConnectionStatus();
   const [nowMs, setNowMs] = useState(() => Date.now());
   const lastForcedReconnectAtRef = useRef(0);
+  const reconnectCheckInTimerRef = useRef<number | null>(null);
+  const reconnectCheckInThreadIdsRef = useRef<ReadonlyArray<ThreadId>>([]);
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const toastResetTimerRef = useRef<number | null>(null);
   const previousUiStateRef = useRef<WsConnectionUiState>(getWsConnectionUiState(status));
@@ -314,6 +332,67 @@ export function WebSocketConnectionCoordinator() {
     }
 
     runReconnect(false);
+  });
+  const runReconnectCheckIn = useEffectEvent(() => {
+    reconnectCheckInTimerRef.current = null;
+    const api = readNativeApi();
+    if (!api) {
+      return;
+    }
+
+    const storage = getReconnectCheckInStorage();
+    const targetThreadIds =
+      reconnectCheckInThreadIdsRef.current.length > 0
+        ? reconnectCheckInThreadIdsRef.current
+        : readPersistedReconnectCheckInThreadIds(storage);
+    if (targetThreadIds.length === 0) {
+      return;
+    }
+
+    const { bootstrapComplete, threads } = useStore.getState();
+    if (!bootstrapComplete) {
+      reconnectCheckInThreadIdsRef.current = targetThreadIds;
+      writePersistedReconnectCheckInThreadIds(storage, targetThreadIds);
+      reconnectCheckInTimerRef.current = window.setTimeout(
+        runReconnectCheckIn,
+        RECONNECT_CHECK_IN_DELAY_MS,
+      );
+      return;
+    }
+
+    const remainingThreadIds: ThreadId[] = [];
+
+    for (const threadId of targetThreadIds) {
+      const thread = threads.find((entry) => entry.id === threadId);
+      const disposition = getReconnectCheckInDisposition(thread);
+
+      if (disposition === "retry") {
+        remainingThreadIds.push(threadId);
+        continue;
+      }
+      if (disposition === "skip" || !thread) {
+        continue;
+      }
+
+      void api.orchestration
+        .dispatchCommand({
+          type: "thread.reconnect-checkin",
+          commandId: newCommandId(),
+          threadId: thread.id,
+          createdAt: new Date().toISOString(),
+        })
+        .catch(() => undefined);
+    }
+
+    reconnectCheckInThreadIdsRef.current = remainingThreadIds;
+    writePersistedReconnectCheckInThreadIds(storage, remainingThreadIds);
+
+    if (remainingThreadIds.length > 0) {
+      reconnectCheckInTimerRef.current = window.setTimeout(
+        runReconnectCheckIn,
+        RECONNECT_CHECK_IN_DELAY_MS,
+      );
+    }
   });
 
   useEffect(() => {
@@ -393,6 +472,16 @@ export function WebSocketConnectionCoordinator() {
       toastResetTimerRef.current = null;
     }
 
+    if (
+      (uiState === "reconnecting" || uiState === "offline") &&
+      previousUiState === "connected" &&
+      reconnectCheckInThreadIdsRef.current.length === 0
+    ) {
+      const threadIds = captureReconnectCheckInThreadIds(useStore.getState().threads);
+      reconnectCheckInThreadIdsRef.current = threadIds;
+      writePersistedReconnectCheckInThreadIds(getReconnectCheckInStorage(), threadIds);
+    }
+
     if (shouldShowReconnectToast || shouldShowOfflineToast || shouldShowExhaustedToast) {
       const toastPayload = shouldShowOfflineToast
         ? {
@@ -445,6 +534,27 @@ export function WebSocketConnectionCoordinator() {
       toastIdRef.current = null;
     }
 
+    const hasPersistedReconnectCheckIns =
+      readPersistedReconnectCheckInThreadIds(getReconnectCheckInStorage()).length > 0;
+
+    if (
+      shouldScheduleReconnectCheckIn({
+        hasPersistedThreadIds: hasPersistedReconnectCheckIns,
+        previousDisconnectedAt,
+        previousUiState,
+        uiState,
+      }) &&
+      reconnectCheckInTimerRef.current === null
+    ) {
+      if (reconnectCheckInTimerRef.current !== null) {
+        window.clearTimeout(reconnectCheckInTimerRef.current);
+      }
+      reconnectCheckInTimerRef.current = window.setTimeout(
+        runReconnectCheckIn,
+        RECONNECT_CHECK_IN_DELAY_MS,
+      );
+    }
+
     if (
       uiState === "connected" &&
       (previousUiState === "offline" || previousUiState === "reconnecting") &&
@@ -479,6 +589,9 @@ export function WebSocketConnectionCoordinator() {
 
   useEffect(() => {
     return () => {
+      if (reconnectCheckInTimerRef.current !== null) {
+        window.clearTimeout(reconnectCheckInTimerRef.current);
+      }
       if (toastResetTimerRef.current !== null) {
         window.clearTimeout(toastResetTimerRef.current);
       }

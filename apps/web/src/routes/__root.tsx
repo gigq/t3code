@@ -52,6 +52,13 @@ import {
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { deriveReplayRetryDecision } from "../orchestrationRecovery";
+import {
+  readLastServerInstanceId,
+  readServerInstanceReloadTarget,
+  shouldReloadForServerInstanceChange,
+  writeLastServerInstanceId,
+  writeServerInstanceReloadTarget,
+} from "../serverInstanceReload";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 export const Route = createRootRouteWithContext<{
@@ -235,6 +242,25 @@ function EventRouter() {
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
+
+    const reloadStorage = typeof window === "undefined" ? null : window.sessionStorage;
+    const previousServerInstanceId = readLastServerInstanceId(reloadStorage);
+    const previousReloadTarget = readServerInstanceReloadTarget(reloadStorage);
+    if (
+      shouldReloadForServerInstanceChange({
+        previousServerInstanceId,
+        nextServerInstanceId: payload.serverInstanceId,
+        previousReloadTarget,
+      })
+    ) {
+      writeLastServerInstanceId(reloadStorage, payload.serverInstanceId);
+      writeServerInstanceReloadTarget(reloadStorage, payload.serverInstanceId);
+      window.location.reload();
+      return;
+    }
+
+    writeLastServerInstanceId(reloadStorage, payload.serverInstanceId);
+    writeServerInstanceReloadTarget(reloadStorage, null);
 
     migrateLocalSettingsToServer();
     void (async () => {

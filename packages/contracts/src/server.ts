@@ -173,6 +173,7 @@ export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Typ
 export const ServerLifecycleWelcomePayload = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   projectName: TrimmedNonEmptyString,
+  serverInstanceId: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
   bootstrapThreadId: Schema.optional(ThreadId),
 });

@@ -159,6 +159,7 @@ function buildFixture(): TestFixture {
     welcome: {
       cwd: "/repo/project",
       projectName: "Project",
+      serverInstanceId: "server-1",
       bootstrapProjectId: PROJECT_ID,
       bootstrapThreadId: THREAD_ID,
     },

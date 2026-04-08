@@ -17,6 +17,7 @@ it.effect(
           payload: {
             cwd: "/tmp/project",
             projectName: "project",
+            serverInstanceId: "server-1",
           },
         })
         .pipe(Effect.timeoutOption("50 millis"));

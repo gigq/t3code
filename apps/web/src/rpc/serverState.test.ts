@@ -195,6 +195,7 @@ describe("serverState", () => {
       payload: {
         cwd: "/tmp/workspace",
         projectName: "t3-code",
+        serverInstanceId: "server-1",
         bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
         bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
       },
@@ -203,6 +204,7 @@ describe("serverState", () => {
     expect(listener).toHaveBeenCalledWith({
       cwd: "/tmp/workspace",
       projectName: "t3-code",
+      serverInstanceId: "server-1",
       bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
       bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
     });
@@ -212,6 +214,7 @@ describe("serverState", () => {
     expect(lateListener).toHaveBeenCalledWith({
       cwd: "/tmp/workspace",
       projectName: "t3-code",
+      serverInstanceId: "server-1",
       bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
       bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
     });

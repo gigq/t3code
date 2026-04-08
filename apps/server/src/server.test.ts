@@ -1108,6 +1108,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             payload: {
               cwd: "/tmp/project",
               projectName: "project",
+              serverInstanceId: "server-1",
             },
           },
         ] as const;

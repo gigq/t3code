@@ -56,6 +56,10 @@
       "types": "./src/autoMode.ts",
       "import": "./src/autoMode.ts"
     },
+    "./reconnectCheckIn": {
+      "types": "./src/reconnectCheckIn.ts",
+      "import": "./src/reconnectCheckIn.ts"
+    },
     "./projectScripts": {
       "types": "./src/projectScripts.ts",
       "import": "./src/projectScripts.ts"

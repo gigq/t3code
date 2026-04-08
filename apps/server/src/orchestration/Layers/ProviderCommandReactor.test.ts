@@ -326,6 +326,29 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("reacts to thread.reconnect-checkin by sending a hidden provider follow-up turn", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.reconnect-checkin",
+        commandId: CommandId.makeUnsafe("cmd-reconnect-checkin-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: expect.stringContaining("<reconnect_checkin>"),
+    });
+  });
+
   it("generates a thread title on the first turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

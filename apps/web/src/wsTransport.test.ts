@@ -438,6 +438,7 @@ describe("WsTransport", () => {
       payload: {
         cwd: "/tmp/workspace",
         projectName: "workspace",
+        serverInstanceId: "server-1",
       },
     };
 
@@ -491,6 +492,7 @@ describe("WsTransport", () => {
             payload: {
               cwd: "/tmp/one",
               projectName: "one",
+              serverInstanceId: "server-1",
             },
           },
         ],
@@ -534,6 +536,7 @@ describe("WsTransport", () => {
       payload: {
         cwd: "/tmp/two",
         projectName: "two",
+        serverInstanceId: "server-2",
       },
     };
     socket.serverMessage(
