@@ -55,6 +55,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
 type ThreadStatusInput = Pick<
   SidebarThreadSummary,
   | "hasActionableProposedPlan"
+  | "hasLocallyActiveLatestTurn"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "interactionMode"
@@ -343,7 +344,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "running") {
+  if (thread.session?.status === "running" || thread.hasLocallyActiveLatestTurn) {
     return {
       label: "Working",
       colorClass: isAutoThread

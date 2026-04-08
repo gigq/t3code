@@ -130,6 +130,17 @@ export function formatElapsed(startIso: string, endIso: string | undefined): str
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
 type SessionActivityState = Pick<ThreadSession, "orchestrationStatus" | "activeTurnId">;
 
+interface LatestTurnMessageState {
+  role: ChatMessage["role"];
+  turnId?: ChatMessage["turnId"];
+  streaming: ChatMessage["streaming"];
+}
+
+interface LatestTurnActivityState {
+  turnId: OrchestrationThreadActivity["turnId"];
+  createdAt: OrchestrationThreadActivity["createdAt"];
+}
+
 export function isLatestTurnSettled(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
@@ -139,6 +150,47 @@ export function isLatestTurnSettled(
   if (!session) return true;
   if (session.orchestrationStatus === "running") return false;
   return true;
+}
+
+export function hasLocallyActiveLatestTurn(input: {
+  latestTurn: LatestTurnTiming | null;
+  session: SessionActivityState | null;
+  messages: ReadonlyArray<LatestTurnMessageState>;
+  activities: ReadonlyArray<LatestTurnActivityState>;
+}): boolean {
+  const { latestTurn } = input;
+  if (!latestTurn?.turnId) {
+    return false;
+  }
+  if (!isLatestTurnSettled(latestTurn, input.session)) {
+    return true;
+  }
+
+  for (const message of input.messages) {
+    if (message.role !== "assistant" || message.turnId !== latestTurn.turnId) {
+      continue;
+    }
+    if (message.streaming) {
+      return true;
+    }
+  }
+
+  if (!latestTurn.completedAt) {
+    return false;
+  }
+
+  const completedAtMs = Date.parse(latestTurn.completedAt);
+  if (Number.isNaN(completedAtMs)) {
+    return false;
+  }
+
+  return input.activities.some((activity) => {
+    if (activity.turnId !== latestTurn.turnId) {
+      return false;
+    }
+    const createdAtMs = Date.parse(activity.createdAt);
+    return !Number.isNaN(createdAtMs) && createdAtMs > completedAtMs;
+  });
 }
 
 export function deriveActiveWorkStartedAt(

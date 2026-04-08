@@ -48,6 +48,7 @@ describe("hasUnseenCompletion", () => {
     expect(
       hasUnseenCompletion({
         hasActionableProposedPlan: false,
+        hasLocallyActiveLatestTurn: false,
         hasPendingApprovals: false,
         hasPendingUserInput: false,
         interactionMode: "default",
@@ -398,6 +399,7 @@ describe("isContextMenuPointerDown", () => {
 describe("resolveThreadStatusPill", () => {
   const baseThread = {
     hasActionableProposedPlan: false,
+    hasLocallyActiveLatestTurn: false,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     interactionMode: "plan" as const,
@@ -485,6 +487,27 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({
       label: "Waiting",
       pulse: false,
+      dotClass: "bg-amber-500/90",
+    });
+  });
+
+  it("keeps showing working when the latest turn is still active locally after the session flips ready", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "auto",
+          hasLocallyActiveLatestTurn: true,
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({
+      label: "Working",
+      pulse: true,
       dotClass: "bg-amber-500/90",
     });
   });

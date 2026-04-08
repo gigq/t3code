@@ -19,6 +19,7 @@ import {
   findLatestProposedPlan,
   findSidebarProposedPlan,
   hasActionableProposedPlan,
+  hasLocallyActiveLatestTurn,
   hasToolActivityForTurn,
   isLatestTurnSettled,
 } from "./session-logic";
@@ -1310,6 +1311,82 @@ describe("deriveActiveWorkStartedAt", () => {
         "2026-02-27T21:11:00.000Z",
       ),
     ).toBe("2026-02-27T21:11:00.000Z");
+  });
+});
+
+describe("hasLocallyActiveLatestTurn", () => {
+  const latestTurn = {
+    turnId: TurnId.makeUnsafe("turn-1"),
+    startedAt: "2026-02-27T21:10:00.000Z",
+    completedAt: "2026-02-27T21:10:06.000Z",
+  } as const;
+
+  it("treats a streaming assistant message as active even when the session already says ready", () => {
+    expect(
+      hasLocallyActiveLatestTurn({
+        latestTurn,
+        session: {
+          orchestrationStatus: "ready",
+          activeTurnId: undefined,
+        },
+        messages: [
+          {
+            role: "assistant",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            streaming: true,
+          },
+        ],
+        activities: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("treats later activity on the latest turn as active even after a stale completion", () => {
+    expect(
+      hasLocallyActiveLatestTurn({
+        latestTurn,
+        session: {
+          orchestrationStatus: "ready",
+          activeTurnId: undefined,
+        },
+        messages: [],
+        activities: [
+          makeActivity({
+            id: "late-activity",
+            kind: "tool.started",
+            createdAt: "2026-02-27T21:10:07.000Z",
+            turnId: "turn-1",
+          }),
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false once the latest turn is settled and nothing newer is arriving", () => {
+    expect(
+      hasLocallyActiveLatestTurn({
+        latestTurn,
+        session: {
+          orchestrationStatus: "ready",
+          activeTurnId: undefined,
+        },
+        messages: [
+          {
+            role: "assistant",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            streaming: false,
+          },
+        ],
+        activities: [
+          makeActivity({
+            id: "same-time-activity",
+            kind: "tool.completed",
+            createdAt: "2026-02-27T21:10:06.000Z",
+            turnId: "turn-1",
+          }),
+        ],
+      }),
+    ).toBe(false);
   });
 });
 

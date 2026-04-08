@@ -124,6 +124,7 @@ export interface SidebarThreadSummary {
   archivedAt: string | null;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
+  hasLocallyActiveLatestTurn: boolean;
   branch: string | null;
   worktreePath: string | null;
   latestUserMessageAt: string | null;

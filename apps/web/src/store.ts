@@ -16,6 +16,7 @@ import { create } from "zustand";
 import {
   findLatestProposedPlan,
   hasActionableProposedPlan,
+  hasLocallyActiveLatestTurn,
   derivePendingApprovals,
   derivePendingUserInputs,
 } from "./session-logic";
@@ -224,6 +225,12 @@ function buildSidebarThreadSummary(thread: Thread): SidebarThreadSummary {
     archivedAt: thread.archivedAt,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
+    hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+      latestTurn: thread.latestTurn,
+      session: thread.session,
+      messages: thread.messages,
+      activities: thread.activities,
+    }),
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     latestUserMessageAt: getLatestUserMessageAt(thread.messages),
@@ -251,6 +258,7 @@ function sidebarThreadSummariesEqual(
     left.archivedAt === right.archivedAt &&
     left.updatedAt === right.updatedAt &&
     left.latestTurn === right.latestTurn &&
+    left.hasLocallyActiveLatestTurn === right.hasLocallyActiveLatestTurn &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.latestUserMessageAt === right.latestUserMessageAt &&

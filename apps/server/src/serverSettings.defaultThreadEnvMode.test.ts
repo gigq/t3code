@@ -16,12 +16,12 @@ const makeServerSettingsLayer = () =>
   );
 
 it.layer(NodeServices.layer)("server settings default thread env mode", (it) => {
-  it.effect("defaults new thread env mode to worktree when settings are unset", () =>
+  it.effect("defaults new thread env mode to local when settings are unset", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
       const settings = yield* serverSettings.getSettings;
 
-      assert.equal(settings.defaultThreadEnvMode, "worktree");
+      assert.equal(settings.defaultThreadEnvMode, "local");
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 });

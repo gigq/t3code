@@ -60,6 +60,7 @@ import {
   findLatestProposedPlan,
   deriveWorkLogEntries,
   hasActionableProposedPlan,
+  hasLocallyActiveLatestTurn,
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
@@ -1244,7 +1245,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const hasVisibleTurnActivity = hasLocallyActiveLatestTurn({
+    latestTurn: activeLatestTurn,
+    session: activeThread?.session ?? null,
+    messages: activeThread?.messages ?? [],
+    activities: threadActivities,
+  });
+  const isWorking =
+    phase === "running" ||
+    isSendBusy ||
+    isConnecting ||
+    isRevertingCheckpoint ||
+    hasVisibleTurnActivity;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
