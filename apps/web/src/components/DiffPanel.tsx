@@ -196,7 +196,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const gitStatusQuery = useQuery(gitStatusQueryOptions(activeCwd ?? null));
   const gitWorkingTreeDiffQuery = useQuery(gitWorkingTreeDiffQueryOptions(activeCwd ?? null));
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
-  const hasDirtyWorkingTree = gitStatusQuery.data?.hasWorkingTreeChanges ?? false;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -510,10 +509,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
               )}
             >
-              <div className="text-[10px] leading-tight font-medium">Dirty changes</div>
-              <div className="text-[9px] leading-tight opacity-70">
-                {hasDirtyWorkingTree ? "Workspace" : "Clean"}
-              </div>
+              <div className="text-[10px] leading-tight font-medium">Workspace</div>
             </div>
           </button>
           <button
