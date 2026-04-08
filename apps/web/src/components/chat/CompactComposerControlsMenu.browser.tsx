@@ -203,6 +203,19 @@ describe("CompactComposerControlsMenu", () => {
     });
   });
 
+  it("lists interaction modes in chat auto plan order", async () => {
+    await using _ = await mountMenu();
+
+    await page.getByLabelText("More composer controls").click();
+
+    await vi.waitFor(() => {
+      const items = Array.from(document.querySelectorAll('[role="menuitemradio"]'))
+        .map((element) => element.textContent?.trim())
+        .filter((value): value is string => Boolean(value));
+      expect(items.slice(0, 3)).toEqual(["Chat", "Auto", "Plan"]);
+    });
+  });
+
   it("shows a Claude thinking on/off section for Haiku", async () => {
     await using _ = await mountMenu({
       modelSelection: {

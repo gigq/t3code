@@ -215,8 +215,8 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const INTERACTION_MODE_CYCLE_ORDER: readonly ProviderInteractionMode[] = [
   "default",
-  "plan",
   "auto",
+  "plan",
 ];
 
 function nextInteractionMode(current: ProviderInteractionMode): ProviderInteractionMode {
@@ -739,6 +739,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     useState<Record<string, number>>({});
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [dismissingProposedPlanId, setDismissingProposedPlanId] = useState<string | null>(null);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
@@ -1207,10 +1208,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const activeProposedPlanDismissPending =
+    activeProposedPlan !== null && activeProposedPlan.id === dismissingProposedPlanId;
+  useEffect(() => {
+    if (dismissingProposedPlanId === null) {
+      return;
+    }
+    if (
+      activeProposedPlan === null ||
+      activeProposedPlan.id !== dismissingProposedPlanId ||
+      activeProposedPlan.dismissedAt !== null
+    ) {
+      setDismissingProposedPlanId(null);
+    }
+  }, [activeProposedPlan, dismissingProposedPlanId]);
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
     latestTurnSettled &&
+    !activeProposedPlanDismissPending &&
     hasActionableProposedPlan(activeProposedPlan);
   const activePendingApproval = pendingApprovals[0] ?? null;
   const {
@@ -3613,6 +3629,41 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
 
+  const onDismissActiveProposedPlan = useCallback(async () => {
+    const api = readNativeApi();
+    if (
+      !api ||
+      !activeThread ||
+      !activeProposedPlan ||
+      activeProposedPlanDismissPending ||
+      !isServerThread
+    ) {
+      return;
+    }
+
+    const dismissedAt = new Date().toISOString();
+    setDismissingProposedPlanId(activeProposedPlan.id);
+    setPlanSidebarOpen(false);
+    planSidebarDismissedForTurnRef.current = activeProposedPlan.turnId ?? null;
+
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.proposed-plan.dismiss",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        planId: activeProposedPlan.id,
+        createdAt: dismissedAt,
+      });
+    } catch (error) {
+      setDismissingProposedPlanId(null);
+      toastManager.add({
+        type: "error",
+        title: "Could not close out plan",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    }
+  }, [activeProposedPlan, activeProposedPlanDismissPending, activeThread, isServerThread]);
+
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readNativeApi();
     if (
@@ -4267,6 +4318,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       <ComposerPlanFollowUpBanner
                         key={activeProposedPlan.id}
                         planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
+                        onDismiss={() => void onDismissActiveProposedPlan()}
+                        dismissing={activeProposedPlanDismissPending}
                       />
                     </div>
                   ) : null}
@@ -4652,6 +4705,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
+            onDismissPlan={
+              sidebarProposedPlan &&
+              hasActionableProposedPlan(sidebarProposedPlan) &&
+              sidebarProposedPlan.id === activeProposedPlan?.id
+                ? () => void onDismissActiveProposedPlan()
+                : null
+            }
+            isDismissingPlan={
+              sidebarProposedPlan !== null && sidebarProposedPlan.id === dismissingProposedPlanId
+            }
             onClose={() => {
               setPlanSidebarOpen(false);
               // Track that the user explicitly dismissed for this turn so auto-open won't fight them.

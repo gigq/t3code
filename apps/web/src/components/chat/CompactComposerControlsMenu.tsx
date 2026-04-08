@@ -55,8 +55,8 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           }}
         >
           <MenuRadioItem value="default">Chat</MenuRadioItem>
-          <MenuRadioItem value="plan">Plan</MenuRadioItem>
           <MenuRadioItem value="auto">Auto</MenuRadioItem>
+          <MenuRadioItem value="plan">Plan</MenuRadioItem>
         </MenuRadioGroup>
         {props.interactionMode === "auto" && props.onSetAutoDeferUntil ? (
           <>
