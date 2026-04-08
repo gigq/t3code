@@ -716,8 +716,6 @@ export default function Sidebar() {
   const [addingProject, setAddingProject] = useState(false);
   const [isPickingFolder, setIsPickingFolder] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
-  const [addProjectError, setAddProjectError] = useState<string | null>(null);
-  const addProjectInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<ProjectId | null>(null);
   const [renamingProjectTitle, setRenamingProjectTitle] = useState("");
   const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
@@ -1271,15 +1269,13 @@ export default function Sidebar() {
 
       const clicked = await api.contextMenu.show(
         [
-          { id: "import-codex-thread", label: "Import Codex thread..." },
           { id: "rename", label: "Rename project" },
+          { id: "import-codex-thread", label: "Import Codex thread..." },
           { id: "copy-path", label: "Copy Project Path" },
           { id: "delete", label: "Remove project", destructive: true },
         ],
         position,
       );
-      if (clicked === "import-codex-thread") {
-        setImportDialogProjectId(projectId);
       if (clicked === "rename") {
         setRenamingThreadId(null);
         renamingInputRef.current = null;

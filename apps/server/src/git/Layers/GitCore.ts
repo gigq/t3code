@@ -2158,7 +2158,6 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     statusDetails,
     readWorkingTreeDiff,
     statusDetailsLocal,
-    readWorkingTreeDiff,
     prepareCommitContext,
     commit,
     pushCurrentBranch,
