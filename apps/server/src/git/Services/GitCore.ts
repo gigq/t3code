@@ -157,6 +157,11 @@ export interface GitCoreShape {
   readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
 
   /**
+   * Read the current dirty working tree patch against HEAD.
+   */
+  readonly readWorkingTreeDiff: (cwd: string) => Effect.Effect<string, GitCommandError>;
+
+  /**
    * Build staged change context for commit generation.
    */
   readonly prepareCommitContext: (

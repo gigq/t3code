@@ -19,12 +19,16 @@ import {
   useState,
 } from "react";
 import { openInPreferredEditor } from "../editorPreferences";
-import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
+import { gitStatusQueryOptions, gitWorkingTreeDiffQueryOptions } from "~/lib/gitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { resolvePathLinkTarget } from "../terminal-links";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  parseDiffRouteSearch,
+  stripDiffSearchParams,
+  type DiffRouteView,
+} from "../diffRouteSearch";
 import { useTheme } from "../hooks/useTheme";
 import { buildPatchCacheKey } from "../lib/diffRendering";
 import { resolveDiffThemeName } from "../lib/diffRendering";
@@ -190,7 +194,9 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd;
   const gitStatusQuery = useQuery(gitStatusQueryOptions(activeCwd ?? null));
+  const gitWorkingTreeDiffQuery = useQuery(gitWorkingTreeDiffQueryOptions(activeCwd ?? null));
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const hasDirtyWorkingTree = gitStatusQuery.data?.hasWorkingTreeChanges ?? false;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -209,6 +215,8 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   );
 
   const selectedTurnId = diffSearch.diffTurnId ?? null;
+  const activeDiffView: "dirty" | "conversation" | "turn" =
+    selectedTurnId !== null ? "turn" : ((diffSearch.diffView ?? "dirty") as DiffRouteView);
   const selectedFilePath = selectedTurnId !== null ? (diffSearch.diffFilePath ?? null) : null;
   const selectedTurn =
     selectedTurnId === null
@@ -243,23 +251,29 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   }, [inferredCheckpointTurnCountByTurnId, orderedTurnDiffSummaries]);
   const conversationCheckpointRange = useMemo(
     () =>
-      !selectedTurn && typeof conversationCheckpointTurnCount === "number"
+      activeDiffView === "conversation" &&
+      !selectedTurn &&
+      typeof conversationCheckpointTurnCount === "number"
         ? {
             fromTurnCount: 0,
             toTurnCount: conversationCheckpointTurnCount,
           }
         : null,
-    [conversationCheckpointTurnCount, selectedTurn],
+    [activeDiffView, conversationCheckpointTurnCount, selectedTurn],
   );
   const activeCheckpointRange = selectedTurn
     ? selectedCheckpointRange
     : conversationCheckpointRange;
   const conversationCacheScope = useMemo(() => {
-    if (selectedTurn || orderedTurnDiffSummaries.length === 0) {
+    if (
+      activeDiffView !== "conversation" ||
+      selectedTurn ||
+      orderedTurnDiffSummaries.length === 0
+    ) {
       return null;
     }
     return `conversation:${orderedTurnDiffSummaries.map((summary) => summary.turnId).join(",")}`;
-  }, [orderedTurnDiffSummaries, selectedTurn]);
+  }, [activeDiffView, orderedTurnDiffSummaries, selectedTurn]);
   const activeCheckpointDiffQuery = useQuery(
     checkpointDiffQueryOptions({
       threadId: activeThreadId,
@@ -275,15 +289,30 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const conversationCheckpointDiff = selectedTurn
     ? undefined
     : activeCheckpointDiffQuery.data?.diff;
-  const isLoadingCheckpointDiff = activeCheckpointDiffQuery.isLoading;
+  const dirtyWorkingTreeDiff = gitWorkingTreeDiffQuery.data?.diff;
+  const isLoadingCheckpointDiff =
+    activeDiffView === "dirty"
+      ? gitWorkingTreeDiffQuery.isLoading
+      : activeCheckpointDiffQuery.isLoading;
   const checkpointDiffError =
-    activeCheckpointDiffQuery.error instanceof Error
-      ? activeCheckpointDiffQuery.error.message
-      : activeCheckpointDiffQuery.error
-        ? "Failed to load checkpoint diff."
-        : null;
+    activeDiffView === "dirty"
+      ? gitWorkingTreeDiffQuery.error instanceof Error
+        ? gitWorkingTreeDiffQuery.error.message
+        : gitWorkingTreeDiffQuery.error
+          ? "Failed to load dirty changes."
+          : null
+      : activeCheckpointDiffQuery.error instanceof Error
+        ? activeCheckpointDiffQuery.error.message
+        : activeCheckpointDiffQuery.error
+          ? "Failed to load checkpoint diff."
+          : null;
 
-  const selectedPatch = selectedTurn ? selectedTurnCheckpointDiff : conversationCheckpointDiff;
+  const selectedPatch =
+    activeDiffView === "dirty"
+      ? dirtyWorkingTreeDiff
+      : selectedTurn
+        ? selectedTurnCheckpointDiff
+        : conversationCheckpointDiff;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
   const renderablePatch = useMemo(
@@ -342,6 +371,17 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       },
     });
   };
+  const selectDirtyWorkingTree = () => {
+    if (!activeThread) return;
+    void navigate({
+      to: "/$threadId",
+      params: { threadId: activeThread.id },
+      search: (previous) => {
+        const rest = stripDiffSearchParams(previous);
+        return { ...rest, diff: "1", diffView: "dirty" };
+      },
+    });
+  };
   const selectWholeConversation = () => {
     if (!activeThread) return;
     void navigate({
@@ -349,7 +389,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       params: { threadId: activeThread.id },
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
+        return { ...rest, diff: "1", diffView: "conversation" };
       },
     });
   };
@@ -459,13 +499,33 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           <button
             type="button"
             className="shrink-0 rounded-md"
-            onClick={selectWholeConversation}
-            data-turn-chip-selected={selectedTurnId === null}
+            onClick={selectDirtyWorkingTree}
+            data-turn-chip-selected={activeDiffView === "dirty"}
           >
             <div
               className={cn(
                 "rounded-md border px-2 py-1 text-left transition-colors",
-                selectedTurnId === null
+                activeDiffView === "dirty"
+                  ? "border-border bg-accent text-accent-foreground"
+                  : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+              )}
+            >
+              <div className="text-[10px] leading-tight font-medium">Dirty changes</div>
+              <div className="text-[9px] leading-tight opacity-70">
+                {hasDirtyWorkingTree ? "Workspace" : "Clean"}
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded-md"
+            onClick={selectWholeConversation}
+            data-turn-chip-selected={activeDiffView === "conversation"}
+          >
+            <div
+              className={cn(
+                "rounded-md border px-2 py-1 text-left transition-colors",
+                activeDiffView === "conversation"
                   ? "border-border bg-accent text-accent-foreground"
                   : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
               )}
@@ -552,7 +612,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Turn diffs are unavailable because this project is not a git repository.
         </div>
-      ) : orderedTurnDiffSummaries.length === 0 ? (
+      ) : activeDiffView !== "dirty" && orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           No completed turns yet.
         </div>
@@ -569,12 +629,20 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
             )}
             {!renderablePatch ? (
               isLoadingCheckpointDiff ? (
-                <DiffPanelLoadingState label="Loading checkpoint diff..." />
+                <DiffPanelLoadingState
+                  label={
+                    activeDiffView === "dirty"
+                      ? "Loading dirty workspace diff..."
+                      : "Loading checkpoint diff..."
+                  }
+                />
               ) : (
                 <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
                   <p>
                     {hasNoNetChanges
-                      ? "No net changes in this selection."
+                      ? activeDiffView === "dirty"
+                        ? "No dirty changes in the workspace."
+                        : "No net changes in this selection."
                       : "No patch available for this selection."}
                   </p>
                 </div>

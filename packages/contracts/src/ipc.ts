@@ -11,6 +11,8 @@ import type {
   GitListBranchesResult,
   GitPullInput,
   GitPullResult,
+  GitReadWorkingTreeDiffInput,
+  GitReadWorkingTreeDiffResult,
   GitRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitStatusInput,
@@ -171,6 +173,9 @@ export interface NativeApi {
     // Stacked action API
     pull: (input: GitPullInput) => Promise<GitPullResult>;
     status: (input: GitStatusInput) => Promise<GitStatusResult>;
+    readWorkingTreeDiff: (
+      input: GitReadWorkingTreeDiffInput,
+    ) => Promise<GitReadWorkingTreeDiffResult>;
   };
   contextMenu: {
     show: <T extends string>(

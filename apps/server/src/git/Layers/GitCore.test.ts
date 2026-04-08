@@ -2042,6 +2042,25 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
+    it.effect("readWorkingTreeDiff returns full oversized dirty patches without truncation", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* git(tmp, ["config", "diff.mnemonicPrefix", "true"]);
+
+        yield* writeTextFile(path.join(tmp, "README.md"), buildLargeText(90_000));
+
+        const diff = yield* core.readWorkingTreeDiff(tmp);
+        expect(Buffer.byteLength(diff, "utf8")).toBeGreaterThan(1_000_000);
+        expect(diff).toContain("--- a/README.md");
+        expect(diff).toContain("+++ b/README.md");
+        expect(diff).toContain("+line 89999");
+        expect(diff).not.toContain("[truncated]");
+      }),
+    );
+
     it.effect("readRangeContext truncates oversized diff patches instead of failing", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();

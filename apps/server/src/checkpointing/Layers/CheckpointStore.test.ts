@@ -118,5 +118,35 @@ it.layer(TestLayer)("CheckpointStoreLive", (it) => {
         expect(diff).toContain("+line 04999");
       }),
     );
+
+    it.effect("supports checkpoint diffs larger than the generic git output cap", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore;
+        const threadId = ThreadId.makeUnsafe("thread-checkpoint-store-huge");
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: fromCheckpointRef,
+        });
+        yield* writeTextFile(path.join(tmp, "README.md"), buildLargeText(90_000));
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: toCheckpointRef,
+        });
+
+        const diff = yield* checkpointStore.diffCheckpoints({
+          cwd: tmp,
+          fromCheckpointRef,
+          toCheckpointRef,
+        });
+
+        expect(Buffer.byteLength(diff, "utf8")).toBeGreaterThan(1_000_000);
+        expect(diff).toContain("+line 89999");
+      }),
+    );
   });
 });

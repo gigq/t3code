@@ -45,6 +45,7 @@ const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
 const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
+const WORKING_TREE_DIFF_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
@@ -1328,6 +1329,33 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       })),
     );
 
+  const readWorkingTreeDiff: GitCoreShape["readWorkingTreeDiff"] = Effect.fn("readWorkingTreeDiff")(
+    function* (cwd) {
+      const headResult = yield* executeGit(
+        "GitCore.readWorkingTreeDiff.head",
+        cwd,
+        ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        {
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        },
+      );
+
+      if (headResult.code !== 0) {
+        return "";
+      }
+
+      return yield* runGitStdoutWithOptions(
+        "GitCore.readWorkingTreeDiff.diff",
+        cwd,
+        ["-c", "diff.mnemonicPrefix=false", "diff", "HEAD", "--patch", "--minimal", "--no-color"],
+        {
+          maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+        },
+      );
+    },
+  );
+
   const prepareCommitContext: GitCoreShape["prepareCommitContext"] = Effect.fn(
     "prepareCommitContext",
   )(function* (cwd, filePaths) {
@@ -2106,6 +2134,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     execute,
     status,
     statusDetails,
+    readWorkingTreeDiff,
     prepareCommitContext,
     commit,
     pushCurrentBranch,

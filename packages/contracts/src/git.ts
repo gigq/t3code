@@ -102,6 +102,11 @@ export const GitStatusInput = Schema.Struct({
 });
 export type GitStatusInput = typeof GitStatusInput.Type;
 
+export const GitReadWorkingTreeDiffInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type GitReadWorkingTreeDiffInput = typeof GitReadWorkingTreeDiffInput.Type;
+
 export const GitPullInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
 });
@@ -209,6 +214,11 @@ export const GitStatusResult = Schema.Struct({
   pr: Schema.NullOr(GitStatusPr),
 });
 export type GitStatusResult = typeof GitStatusResult.Type;
+
+export const GitReadWorkingTreeDiffResult = Schema.Struct({
+  diff: Schema.String,
+});
+export type GitReadWorkingTreeDiffResult = typeof GitReadWorkingTreeDiffResult.Type;
 
 export const GitListBranchesResult = Schema.Struct({
   branches: Schema.Array(GitBranch),
