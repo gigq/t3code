@@ -81,6 +81,7 @@ export interface LatestProposedPlanState {
   planMarkdown: string;
   implementedAt: string | null;
   implementationThreadId: ThreadId | null;
+  dismissedAt: string | null;
 }
 
 export type TimelineEntry =
@@ -449,9 +450,16 @@ export function findSidebarProposedPlan(input: {
 }
 
 export function hasActionableProposedPlan(
-  proposedPlan: LatestProposedPlanState | Pick<ProposedPlan, "implementedAt"> | null,
+  proposedPlan:
+    | LatestProposedPlanState
+    | Pick<ProposedPlan, "implementedAt" | "dismissedAt">
+    | null,
 ): boolean {
-  return proposedPlan !== null && proposedPlan.implementedAt === null;
+  return (
+    proposedPlan !== null &&
+    proposedPlan.implementedAt === null &&
+    proposedPlan.dismissedAt === null
+  );
 }
 
 export function deriveWorkLogEntries(
@@ -643,6 +651,7 @@ function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPl
     planMarkdown: proposedPlan.planMarkdown,
     implementedAt: proposedPlan.implementedAt,
     implementationThreadId: proposedPlan.implementationThreadId,
+    dismissedAt: proposedPlan.dismissedAt,
   };
 }
 

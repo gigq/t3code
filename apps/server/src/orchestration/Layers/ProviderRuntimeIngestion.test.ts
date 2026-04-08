@@ -22,6 +22,7 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { AUTO_MODE_MAX_CONSECUTIVE_NOOPS } from "@t3tools/shared/autoMode";
 
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -858,6 +859,189 @@ describe("ProviderRuntimeIngestion", () => {
 
     expect(thread.interactionMode).toBe(DEFAULT_PROVIDER_INTERACTION_MODE);
     expect(thread.messages.at(-1)?.text).toBe("<t3code:auto-noop />");
+  });
+
+  it("turns off auto mode after five consecutive auto noops", async () => {
+    const harness = await createHarness();
+    const baseTimeMs = Date.now();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-mode-noop-limit"),
+        threadId: asThreadId("thread-1"),
+        interactionMode: "auto",
+        createdAt: new Date(baseTimeMs).toISOString(),
+      }),
+    );
+
+    for (let index = 0; index < AUTO_MODE_MAX_CONSECUTIVE_NOOPS; index += 1) {
+      const createdAt = new Date(baseTimeMs + index * 1_000).toISOString();
+      const turnId = asTurnId(`turn-auto-noop-limit-${index}`);
+      const itemId = asItemId(`item-auto-noop-limit-${index}`);
+
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId(`evt-turn-started-auto-noop-limit-${index}`),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt,
+        turnId,
+      });
+
+      await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.status === "running" && thread.session?.activeTurnId === turnId,
+      );
+
+      harness.emit({
+        type: "item.completed",
+        eventId: asEventId(`evt-item-completed-auto-noop-limit-${index}`),
+        provider: "codex",
+        createdAt,
+        threadId: asThreadId("thread-1"),
+        turnId,
+        itemId,
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+          detail: "<t3code:auto-noop />",
+        },
+      });
+
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId(`evt-turn-completed-auto-noop-limit-${index}`),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt,
+        turnId,
+        payload: {
+          state: "completed",
+        },
+      });
+    }
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.interactionMode === DEFAULT_PROVIDER_INTERACTION_MODE &&
+        entry.consecutiveAutoNoops === 0 &&
+        entry.session?.status === "ready" &&
+        entry.activities.some(
+          (activity) =>
+            activity.kind === "auto.stop.limit" &&
+            activity.summary === "Auto stopped" &&
+            (activity.payload as { consecutiveAutoNoops?: number }).consecutiveAutoNoops ===
+              AUTO_MODE_MAX_CONSECUTIVE_NOOPS,
+        ),
+      1_000,
+    );
+
+    expect(thread.messages.at(-1)?.text).toBe("<t3code:auto-noop />");
+  });
+
+  it("resets the auto noop counter after a real assistant response", async () => {
+    const harness = await createHarness();
+    const baseTimeMs = Date.now();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-mode-noop-reset"),
+        threadId: asThreadId("thread-1"),
+        interactionMode: "auto",
+        createdAt: new Date(baseTimeMs).toISOString(),
+      }),
+    );
+
+    const noopTurnId = asTurnId("turn-auto-noop-reset-noop");
+    const noopCreatedAt = new Date(baseTimeMs).toISOString();
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-auto-noop-reset-noop"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: noopCreatedAt,
+      turnId: noopTurnId,
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === noopTurnId,
+    );
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-item-completed-auto-noop-reset-noop"),
+      provider: "codex",
+      createdAt: noopCreatedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: noopTurnId,
+      itemId: asItemId("item-auto-noop-reset-noop"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "<t3code:auto-noop />",
+      },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-auto-noop-reset-noop"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: noopCreatedAt,
+      turnId: noopTurnId,
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(harness.engine, (thread) => thread.consecutiveAutoNoops === 1);
+
+    const realTurnId = asTurnId("turn-auto-noop-reset-real");
+    const realCreatedAt = new Date(baseTimeMs + 1_000).toISOString();
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-auto-noop-reset-real"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: realCreatedAt,
+      turnId: realTurnId,
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === realTurnId,
+    );
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-item-completed-auto-noop-reset-real"),
+      provider: "codex",
+      createdAt: realCreatedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: realTurnId,
+      itemId: asItemId("item-auto-noop-reset-real"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "Working through the remaining plan now.",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.interactionMode === "auto" &&
+        entry.consecutiveAutoNoops === 0 &&
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-auto-noop-reset-real" &&
+            message.text === "Working through the remaining plan now.",
+        ),
+    );
+
+    expect(thread.interactionMode).toBe("auto");
+    expect(thread.consecutiveAutoNoops).toBe(0);
   });
 
   it("recovers from a stale completed active turn when auto-stop arrives without a new turn.started", async () => {
@@ -1809,6 +1993,7 @@ describe("ProviderRuntimeIngestion", () => {
     ).toMatchObject({
       implementedAt: null,
       implementationThreadId: null,
+      dismissedAt: null,
     });
 
     harness.emit({
@@ -1836,6 +2021,7 @@ describe("ProviderRuntimeIngestion", () => {
       sourceThreadAfterStart.proposedPlans.find((entry) => entry.id === sourcePlan.id),
     ).toMatchObject({
       implementationThreadId: "thread-implement",
+      dismissedAt: null,
     });
   });
 
@@ -1983,6 +2169,7 @@ describe("ProviderRuntimeIngestion", () => {
     ).toMatchObject({
       implementedAt: null,
       implementationThreadId: null,
+      dismissedAt: null,
     });
 
     const targetThreadAfterRejectedStart = readModel.threads.find(
@@ -2155,6 +2342,7 @@ describe("ProviderRuntimeIngestion", () => {
     ).toMatchObject({
       implementedAt: null,
       implementationThreadId: null,
+      dismissedAt: null,
     });
   });
 

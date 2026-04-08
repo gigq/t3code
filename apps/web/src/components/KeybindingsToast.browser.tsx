@@ -105,6 +105,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         },
         interactionMode: "default",
         autoDeferUntil: null,
+        consecutiveAutoNoops: 0,
         runtimeMode: "full-access",
         branch: "main",
         worktreePath: null,

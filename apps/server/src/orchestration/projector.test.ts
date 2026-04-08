@@ -83,6 +83,7 @@ describe("orchestration projector", () => {
         runtimeMode: "full-access",
         interactionMode: "default",
         autoDeferUntil: null,
+        consecutiveAutoNoops: 0,
         branch: null,
         worktreePath: null,
         latestTurn: null,
@@ -372,6 +373,62 @@ describe("orchestration projector", () => {
       ),
     );
     expect(resumed.threads[0]?.autoDeferUntil).toBeNull();
+  });
+
+  it("applies thread.auto-noop-count-set events", async () => {
+    const now = new Date().toISOString();
+    const model = createEmptyReadModel(now);
+
+    const created = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create-auto-noops",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "auto",
+            autoDeferUntil: null,
+            createdAt: now,
+            updatedAt: now,
+            branch: null,
+            worktreePath: null,
+          },
+        }),
+      ),
+    );
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "thread.auto-noop-count-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-auto-noop-count-set",
+          payload: {
+            threadId: "thread-1",
+            consecutiveAutoNoops: 3,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.consecutiveAutoNoops).toBe(3);
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {

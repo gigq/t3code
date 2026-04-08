@@ -130,6 +130,7 @@ function createPlan(input: {
     planMarkdown: input.planMarkdown,
     implementedAt: null,
     implementationThreadId: null,
+    dismissedAt: null,
     createdAt: isoAt(input.offsetSeconds),
     updatedAt: isoAt(input.offsetSeconds + 1),
   };

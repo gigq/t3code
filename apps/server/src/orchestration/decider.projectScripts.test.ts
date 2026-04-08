@@ -142,6 +142,7 @@ describe("decider project scripts", () => {
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
@@ -204,6 +205,120 @@ describe("decider project scripts", () => {
     });
   });
 
+  it("rewrites the proposed plan with dismissedAt on thread.proposed-plan.dismiss", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-dismiss"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-dismiss"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-dismiss"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-dismiss"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-dismiss"),
+          title: "Project",
+          workspaceRoot: "/tmp/project-dismiss",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const withThread = await Effect.runPromise(
+      projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-dismiss"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-dismiss"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-create-dismiss"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-create-dismiss"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-dismiss"),
+          projectId: asProjectId("project-dismiss"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(withThread, {
+        sequence: 3,
+        eventId: asEventId("evt-plan-upsert-dismiss"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-dismiss"),
+        type: "thread.proposed-plan-upserted",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-plan-upsert-dismiss"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-plan-upsert-dismiss"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-dismiss"),
+          proposedPlan: {
+            id: "plan-dismiss",
+            turnId: null,
+            planMarkdown: "# Plan",
+            implementedAt: null,
+            implementationThreadId: null,
+            dismissedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+      }),
+    );
+
+    const dismissedAt = new Date(Date.parse(now) + 1_000).toISOString();
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.proposed-plan.dismiss",
+          commandId: CommandId.makeUnsafe("cmd-plan-dismiss"),
+          threadId: ThreadId.makeUnsafe("thread-dismiss"),
+          planId: "plan-dismiss",
+          createdAt: dismissedAt,
+        },
+        readModel,
+      }),
+    );
+
+    expect(Array.isArray(result)).toBe(false);
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event?.type).toBe("thread.proposed-plan-upserted");
+    if (event?.type !== "thread.proposed-plan-upserted") {
+      return;
+    }
+    expect(event.payload.proposedPlan).toMatchObject({
+      id: "plan-dismiss",
+      dismissedAt,
+      updatedAt: dismissedAt,
+      implementedAt: null,
+      implementationThreadId: null,
+    });
+  });
+
   it("emits thread.runtime-mode-set from thread.runtime-mode.set", async () => {
     const now = new Date().toISOString();
     const initial = createEmptyReadModel(now);
@@ -252,6 +367,7 @@ describe("decider project scripts", () => {
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
@@ -335,6 +451,7 @@ describe("decider project scripts", () => {
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
@@ -370,7 +487,7 @@ describe("decider project scripts", () => {
     });
   });
 
-  it("clears auto defer when switching away from auto mode", async () => {
+  it("clears auto defer and resets consecutive auto noops when switching away from auto mode", async () => {
     const now = new Date().toISOString();
     const deferredUntil = new Date(Date.parse(now) + 15 * 60_000).toISOString();
     const initial = createEmptyReadModel(now);
@@ -397,7 +514,7 @@ describe("decider project scripts", () => {
         },
       }),
     );
-    const readModel = await Effect.runPromise(
+    const createdThread = await Effect.runPromise(
       projectEvent(withProject, {
         sequence: 2,
         eventId: asEventId("evt-thread-create-auto-defer"),
@@ -419,10 +536,30 @@ describe("decider project scripts", () => {
           },
           interactionMode: "auto",
           autoDeferUntil: deferredUntil,
+          consecutiveAutoNoops: 0,
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
           createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(createdThread, {
+        sequence: 3,
+        eventId: asEventId("evt-thread-auto-noops"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-1"),
+        type: "thread.auto-noop-count-set",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-auto-noops"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-auto-noops"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          consecutiveAutoNoops: 4,
           updatedAt: now,
         },
       }),
@@ -442,7 +579,7 @@ describe("decider project scripts", () => {
     );
 
     const events = Array.isArray(result) ? result : [result];
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(3);
     expect(events[0]).toMatchObject({
       type: "thread.interaction-mode-set",
       payload: {
@@ -455,6 +592,13 @@ describe("decider project scripts", () => {
       payload: {
         threadId: ThreadId.makeUnsafe("thread-1"),
         autoDeferUntil: null,
+      },
+    });
+    expect(events[2]).toMatchObject({
+      type: "thread.auto-noop-count-set",
+      payload: {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        consecutiveAutoNoops: 0,
       },
     });
   });
@@ -508,6 +652,7 @@ describe("decider project scripts", () => {
           },
           interactionMode: "auto",
           autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,

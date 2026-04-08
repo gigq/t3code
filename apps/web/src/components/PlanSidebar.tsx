@@ -56,6 +56,8 @@ interface PlanSidebarProps {
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
   timestampFormat: TimestampFormat;
+  onDismissPlan: (() => void) | null;
+  isDismissingPlan?: boolean;
   onClose: () => void;
 }
 
@@ -65,6 +67,8 @@ const PlanSidebar = memo(function PlanSidebar({
   markdownCwd,
   workspaceRoot,
   timestampFormat,
+  onDismissPlan,
+  isDismissingPlan = false,
   onClose,
 }: PlanSidebarProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
@@ -160,6 +164,11 @@ const PlanSidebar = memo(function PlanSidebar({
                 >
                   Save to workspace
                 </MenuItem>
+                {onDismissPlan ? (
+                  <MenuItem onClick={onDismissPlan} disabled={isDismissingPlan}>
+                    Close out plan
+                  </MenuItem>
+                ) : null}
               </MenuPopup>
             </Menu>
           ) : null}

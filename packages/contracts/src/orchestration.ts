@@ -174,6 +174,7 @@ export const OrchestrationProposedPlan = Schema.Struct({
   planMarkdown: TrimmedNonEmptyString,
   implementedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
   implementationThreadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
+  dismissedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -277,6 +278,7 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
   autoDeferUntil: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consecutiveAutoNoops: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 0)),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
@@ -395,6 +397,14 @@ const ThreadAutoDeferSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadAutoNoopCountSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.auto-noop-count.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  consecutiveAutoNoops: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -500,6 +510,14 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadProposedPlanDismissCommand = Schema.Struct({
+  type: Schema.Literal("thread.proposed-plan.dismiss"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  planId: OrchestrationProposedPlanId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -518,6 +536,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadProposedPlanDismissCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -540,6 +559,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadProposedPlanDismissCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -638,6 +658,7 @@ const ThreadRevertCompleteCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
+  ThreadAutoNoopCountSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadMessageImportCommand,
@@ -667,6 +688,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.auto-defer-set",
+  "thread.auto-noop-count-set",
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
@@ -721,6 +743,7 @@ export const ThreadCreatedPayload = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
   autoDeferUntil: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consecutiveAutoNoops: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 0)),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
@@ -769,6 +792,12 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
 export const ThreadAutoDeferSetPayload = Schema.Struct({
   threadId: ThreadId,
   autoDeferUntil: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadAutoNoopCountSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  consecutiveAutoNoops: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 0)),
   updatedAt: IsoDateTime,
 });
 
@@ -943,6 +972,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.auto-defer-set"),
     payload: ThreadAutoDeferSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.auto-noop-count-set"),
+    payload: ThreadAutoNoopCountSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

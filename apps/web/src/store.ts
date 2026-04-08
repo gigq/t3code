@@ -135,6 +135,7 @@ function mapProposedPlan(proposedPlan: OrchestrationProposedPlan): Thread["propo
     planMarkdown: proposedPlan.planMarkdown,
     implementedAt: proposedPlan.implementedAt,
     implementationThreadId: proposedPlan.implementationThreadId,
+    dismissedAt: proposedPlan.dismissedAt,
     createdAt: proposedPlan.createdAt,
     updatedAt: proposedPlan.updatedAt,
   };
@@ -655,6 +656,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         runtimeMode: event.payload.runtimeMode,
         interactionMode: event.payload.interactionMode,
         autoDeferUntil: event.payload.autoDeferUntil,
+        consecutiveAutoNoops: event.payload.consecutiveAutoNoops,
         branch: event.payload.branch,
         worktreePath: event.payload.worktreePath,
         latestTurn: null,

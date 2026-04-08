@@ -16,7 +16,11 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { AUTO_MODE_NOOP_SENTINEL, parseAutoModeControlMessage } from "@t3tools/shared/autoMode";
+import {
+  AUTO_MODE_MAX_CONSECUTIVE_NOOPS,
+  AUTO_MODE_NOOP_SENTINEL,
+  parseAutoModeControlMessage,
+} from "@t3tools/shared/autoMode";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -752,12 +756,67 @@ const make = Effect.fn("make")(function* () {
           ? fallbackText
           : existingText;
     const autoModeControl = parseAutoModeControlMessage(rawText, new Date(input.createdAt));
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const thread = readModel.threads.find((entry) => entry.id === input.threadId);
+    const isThreadInAutoMode = thread?.interactionMode === "auto";
+    const consecutiveAutoNoops = thread?.consecutiveAutoNoops ?? 0;
     const shouldEmitCompletionDelta = bufferedText.length > 0 || fallbackText.length > 0;
     const text =
       (autoModeControl?.kind === "defer" || autoModeControl?.kind === "stop") &&
       shouldEmitCompletionDelta
         ? AUTO_MODE_NOOP_SENTINEL
         : rawText;
+
+    if (isThreadInAutoMode && autoModeControl?.kind === "noop") {
+      const nextConsecutiveAutoNoops = consecutiveAutoNoops + 1;
+      yield* orchestrationEngine.dispatch({
+        type: "thread.auto-noop-count.set",
+        commandId: providerCommandId(input.event, "auto-noop-count-set"),
+        threadId: input.threadId,
+        consecutiveAutoNoops: nextConsecutiveAutoNoops,
+        createdAt: input.createdAt,
+      });
+
+      if (nextConsecutiveAutoNoops >= AUTO_MODE_MAX_CONSECUTIVE_NOOPS) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: providerCommandId(input.event, "auto-noop-limit-activity"),
+          threadId: input.threadId,
+          activity: {
+            id: input.event.eventId,
+            tone: "tool",
+            kind: "auto.stop.limit",
+            summary: "Auto stopped",
+            payload: {
+              reason: "noop-limit",
+              consecutiveAutoNoops: nextConsecutiveAutoNoops,
+            },
+            turnId: input.turnId ?? null,
+            createdAt: input.createdAt,
+          },
+          createdAt: input.createdAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: providerCommandId(input.event, "auto-noop-limit-interaction-mode-set"),
+          threadId: input.threadId,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          createdAt: input.createdAt,
+        });
+      }
+    } else if (
+      isThreadInAutoMode &&
+      consecutiveAutoNoops > 0 &&
+      autoModeControl?.kind !== "defer"
+    ) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.auto-noop-count.set",
+        commandId: providerCommandId(input.event, "auto-noop-count-reset"),
+        threadId: input.threadId,
+        consecutiveAutoNoops: 0,
+        createdAt: input.createdAt,
+      });
+    }
 
     if (shouldEmitCompletionDelta && text.length > 0) {
       yield* orchestrationEngine.dispatch({
@@ -810,6 +869,7 @@ const make = Effect.fn("make")(function* () {
       createdAt: string;
       implementedAt: string | null;
       implementationThreadId: ThreadId | null;
+      dismissedAt: string | null;
     }>;
     planId: string;
     turnId?: TurnId;
@@ -833,6 +893,7 @@ const make = Effect.fn("make")(function* () {
         planMarkdown,
         implementedAt: existingPlan?.implementedAt ?? null,
         implementationThreadId: existingPlan?.implementationThreadId ?? null,
+        dismissedAt: existingPlan?.dismissedAt ?? null,
         createdAt: existingPlan?.createdAt ?? input.createdAt,
         updatedAt: input.updatedAt,
       },
@@ -848,6 +909,7 @@ const make = Effect.fn("make")(function* () {
       createdAt: string;
       implementedAt: string | null;
       implementationThreadId: ThreadId | null;
+      dismissedAt: string | null;
     }>;
     planId: string;
     turnId?: TurnId;

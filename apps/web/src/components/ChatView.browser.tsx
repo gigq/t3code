@@ -272,6 +272,7 @@ function createSnapshotForTargetUser(options: {
         },
         interactionMode: "default",
         autoDeferUntil: null,
+        consecutiveAutoNoops: 0,
         runtimeMode: "full-access",
         branch: "main",
         worktreePath: null,
@@ -331,6 +332,7 @@ function addThreadToSnapshot(
         },
         interactionMode: "default",
         autoDeferUntil: null,
+        consecutiveAutoNoops: 0,
         runtimeMode: "full-access",
         branch: "main",
         worktreePath: null,
@@ -380,6 +382,7 @@ function createThreadCreatedEvent(threadId: ThreadId, sequence: number): Orchest
       runtimeMode: "full-access",
       interactionMode: "default",
       autoDeferUntil: null,
+      consecutiveAutoNoops: 0,
       branch: "main",
       worktreePath: null,
       createdAt: NOW_ISO,
@@ -507,6 +510,7 @@ function createSnapshotWithLongProposedPlan(): OrchestrationReadModel {
                 planMarkdown,
                 implementedAt: null,
                 implementationThreadId: null,
+                dismissedAt: null,
                 createdAt: isoAt(1_000),
                 updatedAt: isoAt(1_001),
               },
@@ -610,6 +614,7 @@ function createSnapshotWithPlanFollowUpPrompt(): OrchestrationReadModel {
                 planMarkdown: "# Follow-up plan\n\n- Keep the composer footer stable on resize.",
                 implementedAt: null,
                 implementationThreadId: null,
+                dismissedAt: null,
                 createdAt: isoAt(1_002),
                 updatedAt: isoAt(1_003),
               },
@@ -2943,6 +2948,47 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(Math.abs(compactModelPickerOffset - initialModelPickerOffset)).toBeLessThanOrEqual(
             1,
           );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("dismisses the active proposed plan from the composer banner", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPlanFollowUpPrompt(),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const dismissButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Close out plan"]'),
+        "Unable to find close-out-plan button.",
+      );
+      dismissButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+                request.type === "thread.proposed-plan.dismiss" &&
+                request.threadId === THREAD_ID &&
+                request.planId === "plan-follow-up-browser-test",
+            ),
+          ).toBe(true);
+          expect(document.body.textContent?.includes("Plan ready")).toBe(false);
         },
         { timeout: 8_000, interval: 16 },
       );

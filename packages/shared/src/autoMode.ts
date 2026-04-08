@@ -1,6 +1,7 @@
 export const AUTO_MODE_NOOP_SENTINEL = "<t3code:auto-noop />";
 export const AUTO_MODE_DEFER_CONTROL_PREFIX = "<t3code:auto-defer";
 export const AUTO_MODE_STOP_SENTINEL = "<t3code:auto-stop />";
+export const AUTO_MODE_MAX_CONSECUTIVE_NOOPS = 5;
 
 export const AUTO_MODE_POLL_INTERVAL_MS = 5_000;
 export const AUTO_MODE_WAKE_DELAY_MS = 45_000;

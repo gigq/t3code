@@ -45,6 +45,7 @@ function makeSnapshot(options?: {
         runtimeMode: "full-access",
         interactionMode: "default",
         autoDeferUntil: null,
+        consecutiveAutoNoops: 0,
         branch: null,
         worktreePath: null,
         latestTurn: null,

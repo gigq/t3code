@@ -162,6 +162,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
           autoDeferUntil: command.autoDeferUntil ?? null,
+          consecutiveAutoNoops: 0,
           branch: command.branch,
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
@@ -309,32 +310,52 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: occurredAt,
         },
       };
-
-      if (command.interactionMode === "auto" || thread.autoDeferUntil === null) {
-        return interactionModeSetEvent;
-      }
-
-      return [
-        interactionModeSetEvent,
-        {
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.auto-defer-set" as const,
-          payload: {
-            threadId: command.threadId,
-            autoDeferUntil: null,
-            updatedAt: occurredAt,
-          },
-        },
+      const followupEvents = [
+        ...(thread.autoDeferUntil !== null && command.interactionMode !== "auto"
+          ? [
+              {
+                ...withEventBase({
+                  aggregateKind: "thread",
+                  aggregateId: command.threadId,
+                  occurredAt,
+                  commandId: command.commandId,
+                }),
+                type: "thread.auto-defer-set" as const,
+                payload: {
+                  threadId: command.threadId,
+                  autoDeferUntil: null,
+                  updatedAt: occurredAt,
+                },
+              },
+            ]
+          : []),
+        ...(thread.consecutiveAutoNoops > 0
+          ? [
+              {
+                ...withEventBase({
+                  aggregateKind: "thread",
+                  aggregateId: command.threadId,
+                  occurredAt,
+                  commandId: command.commandId,
+                }),
+                type: "thread.auto-noop-count-set" as const,
+                payload: {
+                  threadId: command.threadId,
+                  consecutiveAutoNoops: 0,
+                  updatedAt: occurredAt,
+                },
+              },
+            ]
+          : []),
       ];
+
+      return followupEvents.length === 0
+        ? interactionModeSetEvent
+        : [interactionModeSetEvent, ...followupEvents];
     }
 
     case "thread.auto-defer.set": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
@@ -354,35 +375,80 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: occurredAt,
         },
       };
-      if (command.autoDeferUntil === null) {
-        return autoDeferSetEvent;
-      }
-      return [
-        autoDeferSetEvent,
-        {
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.activity-appended" as const,
-          payload: {
-            threadId: command.threadId,
-            activity: {
-              id: crypto.randomUUID() as OrchestrationEvent["eventId"],
-              tone: "tool" as const,
-              kind: "auto.defer.set",
-              summary: "Auto waiting",
-              payload: {
-                autoDeferUntil: command.autoDeferUntil,
+      const followupEvents = [
+        ...(thread.consecutiveAutoNoops > 0
+          ? [
+              {
+                ...withEventBase({
+                  aggregateKind: "thread",
+                  aggregateId: command.threadId,
+                  occurredAt,
+                  commandId: command.commandId,
+                }),
+                type: "thread.auto-noop-count-set" as const,
+                payload: {
+                  threadId: command.threadId,
+                  consecutiveAutoNoops: 0,
+                  updatedAt: occurredAt,
+                },
               },
-              turnId: null,
-              createdAt: occurredAt,
-            },
-          },
-        },
+            ]
+          : []),
+        ...(command.autoDeferUntil !== null
+          ? [
+              {
+                ...withEventBase({
+                  aggregateKind: "thread",
+                  aggregateId: command.threadId,
+                  occurredAt,
+                  commandId: command.commandId,
+                }),
+                type: "thread.activity-appended" as const,
+                payload: {
+                  threadId: command.threadId,
+                  activity: {
+                    id: crypto.randomUUID() as OrchestrationEvent["eventId"],
+                    tone: "tool" as const,
+                    kind: "auto.defer.set",
+                    summary: "Auto waiting",
+                    payload: {
+                      autoDeferUntil: command.autoDeferUntil,
+                    },
+                    turnId: null,
+                    createdAt: occurredAt,
+                  },
+                },
+              },
+            ]
+          : []),
       ];
+
+      return followupEvents.length === 0
+        ? autoDeferSetEvent
+        : [autoDeferSetEvent, ...followupEvents];
+    }
+
+    case "thread.auto-noop-count.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.auto-noop-count-set",
+        payload: {
+          threadId: command.threadId,
+          consecutiveAutoNoops: command.consecutiveAutoNoops,
+          updatedAt: occurredAt,
+        },
+      };
     }
 
     case "thread.turn.start": {
@@ -700,6 +766,39 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           proposedPlan: command.proposedPlan,
+        },
+      };
+    }
+
+    case "thread.proposed-plan.dismiss": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const existingPlan = thread.proposedPlans.find((entry) => entry.id === command.planId);
+      if (!existingPlan) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Proposed plan '${command.planId}' does not exist on thread '${command.threadId}'.`,
+        });
+      }
+
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.proposed-plan-upserted",
+        payload: {
+          threadId: command.threadId,
+          proposedPlan: {
+            ...existingPlan,
+            dismissedAt: existingPlan.dismissedAt ?? command.createdAt,
+            updatedAt: command.createdAt,
+          },
         },
       };
     }

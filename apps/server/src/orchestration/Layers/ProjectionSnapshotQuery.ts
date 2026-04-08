@@ -196,6 +196,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           auto_defer_until AS "autoDeferUntil",
+          consecutive_auto_noops AS "consecutiveAutoNoops",
           branch,
           worktree_path AS "worktreePath",
           latest_turn_id AS "latestTurnId",
@@ -240,6 +241,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           plan_markdown AS "planMarkdown",
           implemented_at AS "implementedAt",
           implementation_thread_id AS "implementationThreadId",
+          dismissed_at AS "dismissedAt",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
@@ -567,6 +569,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               planMarkdown: row.planMarkdown,
               implementedAt: row.implementedAt,
               implementationThreadId: row.implementationThreadId,
+              dismissedAt: row.dismissedAt,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             });
@@ -672,6 +675,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             runtimeMode: row.runtimeMode,
             interactionMode: row.interactionMode,
             autoDeferUntil: row.autoDeferUntil,
+            consecutiveAutoNoops: row.consecutiveAutoNoops,
             branch: row.branch,
             worktreePath: row.worktreePath,
             latestTurn: latestTurnByThread.get(row.threadId) ?? null,

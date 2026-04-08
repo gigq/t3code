@@ -352,6 +352,7 @@ describe("findLatestProposedPlan", () => {
             planMarkdown: "# Older",
             implementedAt: null,
             implementationThreadId: null,
+            dismissedAt: null,
             createdAt: "2026-02-23T00:00:01.000Z",
             updatedAt: "2026-02-23T00:00:01.000Z",
           },
@@ -361,6 +362,7 @@ describe("findLatestProposedPlan", () => {
             planMarkdown: "# Latest",
             implementedAt: null,
             implementationThreadId: null,
+            dismissedAt: null,
             createdAt: "2026-02-23T00:00:01.000Z",
             updatedAt: "2026-02-23T00:00:02.000Z",
           },
@@ -370,6 +372,7 @@ describe("findLatestProposedPlan", () => {
             planMarkdown: "# Different turn",
             implementedAt: null,
             implementationThreadId: null,
+            dismissedAt: null,
             createdAt: "2026-02-23T00:00:03.000Z",
             updatedAt: "2026-02-23T00:00:03.000Z",
           },
@@ -382,6 +385,7 @@ describe("findLatestProposedPlan", () => {
       planMarkdown: "# Latest",
       implementedAt: null,
       implementationThreadId: null,
+      dismissedAt: null,
       createdAt: "2026-02-23T00:00:01.000Z",
       updatedAt: "2026-02-23T00:00:02.000Z",
     });
@@ -396,6 +400,7 @@ describe("findLatestProposedPlan", () => {
           planMarkdown: "# First",
           implementedAt: null,
           implementationThreadId: null,
+          dismissedAt: null,
           createdAt: "2026-02-23T00:00:01.000Z",
           updatedAt: "2026-02-23T00:00:01.000Z",
         },
@@ -405,6 +410,7 @@ describe("findLatestProposedPlan", () => {
           planMarkdown: "# Latest",
           implementedAt: null,
           implementationThreadId: null,
+          dismissedAt: null,
           createdAt: "2026-02-23T00:00:02.000Z",
           updatedAt: "2026-02-23T00:00:03.000Z",
         },
@@ -425,6 +431,7 @@ describe("hasActionableProposedPlan", () => {
         planMarkdown: "# Plan",
         implementedAt: null,
         implementationThreadId: null,
+        dismissedAt: null,
         createdAt: "2026-02-23T00:00:00.000Z",
         updatedAt: "2026-02-23T00:00:01.000Z",
       }),
@@ -439,8 +446,24 @@ describe("hasActionableProposedPlan", () => {
         planMarkdown: "# Plan",
         implementedAt: "2026-02-23T00:00:02.000Z",
         implementationThreadId: ThreadId.makeUnsafe("thread-implement"),
+        dismissedAt: null,
         createdAt: "2026-02-23T00:00:00.000Z",
         updatedAt: "2026-02-23T00:00:02.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false for a dismissed proposed plan", () => {
+    expect(
+      hasActionableProposedPlan({
+        id: "plan-1",
+        turnId: TurnId.makeUnsafe("turn-1"),
+        planMarkdown: "# Plan",
+        implementedAt: null,
+        implementationThreadId: null,
+        dismissedAt: "2026-02-23T00:00:03.000Z",
+        createdAt: "2026-02-23T00:00:00.000Z",
+        updatedAt: "2026-02-23T00:00:03.000Z",
       }),
     ).toBe(false);
   });
@@ -460,6 +483,7 @@ describe("findSidebarProposedPlan", () => {
                 planMarkdown: "# Source plan",
                 implementedAt: "2026-02-23T00:00:03.000Z",
                 implementationThreadId: ThreadId.makeUnsafe("thread-2"),
+                dismissedAt: null,
                 createdAt: "2026-02-23T00:00:01.000Z",
                 updatedAt: "2026-02-23T00:00:02.000Z",
               },
@@ -474,6 +498,7 @@ describe("findSidebarProposedPlan", () => {
                 planMarkdown: "# Latest elsewhere",
                 implementedAt: null,
                 implementationThreadId: null,
+                dismissedAt: null,
                 createdAt: "2026-02-23T00:00:04.000Z",
                 updatedAt: "2026-02-23T00:00:05.000Z",
               },
@@ -496,6 +521,7 @@ describe("findSidebarProposedPlan", () => {
       planMarkdown: "# Source plan",
       implementedAt: "2026-02-23T00:00:03.000Z",
       implementationThreadId: "thread-2",
+      dismissedAt: null,
       createdAt: "2026-02-23T00:00:01.000Z",
       updatedAt: "2026-02-23T00:00:02.000Z",
     });
@@ -514,6 +540,7 @@ describe("findSidebarProposedPlan", () => {
                 planMarkdown: "# Older",
                 implementedAt: null,
                 implementationThreadId: null,
+                dismissedAt: null,
                 createdAt: "2026-02-23T00:00:01.000Z",
                 updatedAt: "2026-02-23T00:00:02.000Z",
               },
@@ -523,6 +550,7 @@ describe("findSidebarProposedPlan", () => {
                 planMarkdown: "# Latest",
                 implementedAt: null,
                 implementationThreadId: null,
+                dismissedAt: null,
                 createdAt: "2026-02-23T00:00:03.000Z",
                 updatedAt: "2026-02-23T00:00:04.000Z",
               },
@@ -969,6 +997,7 @@ describe("deriveTimelineEntries", () => {
           planMarkdown: "# Ship it",
           implementedAt: null,
           implementationThreadId: null,
+          dismissedAt: null,
           createdAt: "2026-02-23T00:00:02.000Z",
           updatedAt: "2026-02-23T00:00:02.000Z",
         },
@@ -990,6 +1019,7 @@ describe("deriveTimelineEntries", () => {
         planMarkdown: "# Ship it",
         implementedAt: null,
         implementationThreadId: null,
+        dismissedAt: null,
       },
     });
   });

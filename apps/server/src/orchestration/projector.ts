@@ -18,6 +18,7 @@ import {
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadAutoDeferSetPayload,
+  ThreadAutoNoopCountSetPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
@@ -276,6 +277,7 @@ export function projectEvent(
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
             autoDeferUntil: payload.autoDeferUntil,
+            consecutiveAutoNoops: payload.consecutiveAutoNoops,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
@@ -382,6 +384,22 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             autoDeferUntil: payload.autoDeferUntil,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.auto-noop-count-set":
+      return decodeForEvent(
+        ThreadAutoNoopCountSetPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            consecutiveAutoNoops: payload.consecutiveAutoNoops,
             updatedAt: payload.updatedAt,
           }),
         })),
