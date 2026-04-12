@@ -262,6 +262,7 @@ function resolveThreadPr(
 
 interface SidebarThreadRowProps {
   threadId: ThreadId;
+  isVisible: boolean;
   projectCwd: string | null;
   orderedProjectThreadIds: readonly ThreadId[];
   routeThreadId: ThreadId | null;
@@ -304,7 +305,7 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
       selectThreadTerminalState(state.terminalStateByThreadId, props.threadId).runningTerminalIds,
   );
   const gitCwd = thread?.worktreePath ?? props.projectCwd;
-  const gitStatus = useGitStatus(thread?.branch != null ? gitCwd : null);
+  const gitStatus = useGitStatus(props.isVisible && thread?.branch != null ? gitCwd : null);
 
   if (!thread) {
     return null;
@@ -1504,6 +1505,10 @@ export default function Sidebar() {
     () => getVisibleSidebarThreadIds(renderedProjects),
     [renderedProjects],
   );
+  const visibleSidebarThreadIdSet = useMemo(
+    () => new Set(visibleSidebarThreadIds),
+    [visibleSidebarThreadIds],
+  );
   const threadJumpCommandById = useMemo(() => {
     const mapping = new Map<ThreadId, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
     for (const [visibleThreadIndex, threadId] of visibleSidebarThreadIds.entries()) {
@@ -1795,6 +1800,7 @@ export default function Sidebar() {
               <SidebarThreadRow
                 key={threadId}
                 threadId={threadId}
+                isVisible={visibleSidebarThreadIdSet.has(threadId)}
                 projectCwd={project.cwd}
                 orderedProjectThreadIds={orderedProjectThreadIds}
                 routeThreadId={routeThreadId}

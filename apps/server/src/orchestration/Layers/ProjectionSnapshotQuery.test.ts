@@ -1,4 +1,10 @@
 import { CheckpointRef, EventId, MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  SNAPSHOT_MAX_THREAD_ACTIVITIES,
+  SNAPSHOT_MAX_THREAD_CHECKPOINTS,
+  SNAPSHOT_MAX_THREAD_MESSAGES,
+  SNAPSHOT_MAX_THREAD_PROPOSED_PLANS,
+} from "@t3tools/shared/threadRetention";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -625,6 +631,631 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           ],
         });
       }
+    }),
+  );
+
+  it.effect("hydrates bootstrap summaries without loading full per-thread histories", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_pending_approvals`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-bootstrap',
+          'Bootstrap Project',
+          '/tmp/bootstrap',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-03-03T00:00:00.000Z',
+          '2026-03-03T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-bootstrap',
+          'project-bootstrap',
+          'Bootstrap Thread',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'auto',
+          'main',
+          NULL,
+          'turn-bootstrap',
+          '2026-03-03T00:00:02.000Z',
+          '2026-03-03T00:00:03.000Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'message-bootstrap-user',
+            'thread-bootstrap',
+            'turn-bootstrap',
+            'user',
+            'hello',
+            0,
+            '2026-03-03T00:00:04.000Z',
+            '2026-03-03T00:00:04.000Z'
+          ),
+          (
+            'message-bootstrap-assistant',
+            'thread-bootstrap',
+            'turn-bootstrap',
+            'assistant',
+            'working',
+            0,
+            '2026-03-03T00:00:05.000Z',
+            '2026-03-03T00:00:05.000Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id,
+          thread_id,
+          turn_id,
+          plan_markdown,
+          implemented_at,
+          implementation_thread_id,
+          dismissed_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'plan-bootstrap',
+          'thread-bootstrap',
+          'turn-bootstrap',
+          '# Keep going',
+          NULL,
+          NULL,
+          NULL,
+          '2026-03-03T00:00:06.000Z',
+          '2026-03-03T00:00:06.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_pending_approvals (
+          request_id,
+          thread_id,
+          turn_id,
+          status,
+          decision,
+          created_at,
+          resolved_at
+        )
+        VALUES (
+          'approval-bootstrap',
+          'thread-bootstrap',
+          'turn-bootstrap',
+          'pending',
+          NULL,
+          '2026-03-03T00:00:07.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          created_at
+        )
+        VALUES (
+          'activity-user-input-bootstrap',
+          'thread-bootstrap',
+          'turn-bootstrap',
+          'approval',
+          'user-input.requested',
+          'Need input',
+          '{"requestId":"user-input-bootstrap"}',
+          '2026-03-03T00:00:08.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_sessions (
+          thread_id,
+          status,
+          provider_name,
+          provider_session_id,
+          provider_thread_id,
+          runtime_mode,
+          active_turn_id,
+          last_error,
+          updated_at
+        )
+        VALUES (
+          'thread-bootstrap',
+          'running',
+          'codex',
+          'provider-session-bootstrap',
+          'provider-thread-bootstrap',
+          'full-access',
+          'turn-bootstrap',
+          NULL,
+          '2026-03-03T00:00:09.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id,
+          turn_id,
+          pending_message_id,
+          source_proposed_plan_thread_id,
+          source_proposed_plan_id,
+          assistant_message_id,
+          state,
+          requested_at,
+          started_at,
+          completed_at,
+          checkpoint_files_json
+        )
+        VALUES (
+          'thread-bootstrap',
+          'turn-bootstrap',
+          NULL,
+          NULL,
+          NULL,
+          'message-bootstrap-assistant',
+          'running',
+          '2026-03-03T00:00:10.000Z',
+          '2026-03-03T00:00:10.000Z',
+          NULL,
+          '[]'
+        )
+      `;
+
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            10,
+            '2026-03-03T00:00:11.000Z'
+          )
+        `;
+      }
+
+      const snapshot = yield* snapshotQuery.getBootstrapSnapshot();
+      const thread = snapshot.threads[0];
+
+      assert.isDefined(thread);
+      assert.equal(thread?.latestUserMessageAt, "2026-03-03T00:00:04.000Z");
+      assert.equal(thread?.hasPendingApprovals, true);
+      assert.equal(thread?.hasPendingUserInput, true);
+      assert.equal(thread?.hasActionableProposedPlan, true);
+      assert.equal(thread?.hasLocallyActiveLatestTurn, true);
+      assert.equal(thread?.interactionMode, "auto");
+      assert.equal(thread?.session?.status, "running");
+    }),
+  );
+
+  it.effect("reads thread replay context with only the target thread transcript", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-replay',
+          'Replay Project',
+          '/tmp/replay-workspace',
+          NULL,
+          '[]',
+          '2026-03-04T00:00:00.000Z',
+          '2026-03-04T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-replay',
+          'project-replay',
+          'Replay Thread',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          '/tmp/replay-worktree',
+          NULL,
+          '2026-03-04T00:00:02.000Z',
+          '2026-03-04T00:00:03.000Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          attachments_json,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'message-replay-user',
+            'thread-replay',
+            'turn-replay-1',
+            'user',
+            'hello',
+            NULL,
+            0,
+            '2026-03-04T00:00:04.000Z',
+            '2026-03-04T00:00:04.000Z'
+          ),
+          (
+            'message-replay-assistant',
+            'thread-replay',
+            'turn-replay-1',
+            'assistant',
+            'hi',
+            NULL,
+            0,
+            '2026-03-04T00:00:05.000Z',
+            '2026-03-04T00:00:05.000Z'
+          ),
+          (
+            'message-replay-system',
+            'thread-replay',
+            NULL,
+            'system',
+            'hidden',
+            NULL,
+            0,
+            '2026-03-04T00:00:06.000Z',
+            '2026-03-04T00:00:06.000Z'
+          )
+      `;
+
+      const replayContext = yield* snapshotQuery.getThreadReplayContext(
+        ThreadId.makeUnsafe("thread-replay"),
+      );
+
+      assert.equal(replayContext._tag, "Some");
+      if (replayContext._tag === "Some") {
+        assert.deepEqual(replayContext.value, {
+          threadId: ThreadId.makeUnsafe("thread-replay"),
+          cwd: "/tmp/replay-worktree",
+          turns: [
+            {
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            {
+              role: "assistant",
+              text: "hi",
+              attachments: [],
+            },
+          ],
+        });
+      }
+    }),
+  );
+  it.effect("retains only the most recent per-thread history in snapshot payloads", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_state`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_threads`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-1',
+          'Project 1',
+          '/tmp/project-1',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-02-24T00:00:00.000Z',
+          '2026-02-24T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-1',
+          'project-1',
+          'Thread 1',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          'turn-latest',
+          '2026-02-24T00:00:02.000Z',
+          '2026-02-24T00:00:03.000Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      for (let index = 0; index < SNAPSHOT_MAX_THREAD_MESSAGES + 3; index += 1) {
+        const iso = `2026-02-24T00:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+          index % 60,
+        ).padStart(2, "0")}.000Z`;
+        yield* sql`
+          INSERT INTO projection_thread_messages (
+            message_id,
+            thread_id,
+            turn_id,
+            role,
+            text,
+            is_streaming,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${`message-${index}`},
+            'thread-1',
+            ${`turn-${index}`},
+            'assistant',
+            ${`message ${index}`},
+            0,
+            ${iso},
+            ${iso}
+          )
+        `;
+      }
+
+      for (let index = 0; index < SNAPSHOT_MAX_THREAD_PROPOSED_PLANS + 3; index += 1) {
+        const iso = `2026-02-24T01:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+          index % 60,
+        ).padStart(2, "0")}.000Z`;
+        yield* sql`
+          INSERT INTO projection_thread_proposed_plans (
+            plan_id,
+            thread_id,
+            turn_id,
+            plan_markdown,
+            implemented_at,
+            implementation_thread_id,
+            dismissed_at,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${`plan-${index}`},
+            'thread-1',
+            ${`turn-${index}`},
+            ${`# Plan ${index}`},
+            NULL,
+            NULL,
+            NULL,
+            ${iso},
+            ${iso}
+          )
+        `;
+      }
+
+      for (let index = 0; index < SNAPSHOT_MAX_THREAD_ACTIVITIES + 3; index += 1) {
+        const iso = `2026-02-24T02:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+          index % 60,
+        ).padStart(2, "0")}.000Z`;
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id,
+            thread_id,
+            turn_id,
+            tone,
+            kind,
+            summary,
+            payload_json,
+            sequence,
+            created_at
+          )
+          VALUES (
+            ${`activity-${index}`},
+            'thread-1',
+            ${`turn-${index}`},
+            'info',
+            'runtime.note',
+            ${`activity ${index}`},
+            ${`{"index":${index}}`},
+            ${index},
+            ${iso}
+          )
+        `;
+      }
+
+      for (let index = 0; index < SNAPSHOT_MAX_THREAD_CHECKPOINTS + 3; index += 1) {
+        const iso = `2026-02-24T03:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+          index % 60,
+        ).padStart(2, "0")}.000Z`;
+        yield* sql`
+          INSERT INTO projection_turns (
+            thread_id,
+            turn_id,
+            pending_message_id,
+            source_proposed_plan_thread_id,
+            source_proposed_plan_id,
+            assistant_message_id,
+            state,
+            requested_at,
+            started_at,
+            completed_at,
+            checkpoint_turn_count,
+            checkpoint_ref,
+            checkpoint_status,
+            checkpoint_files_json
+          )
+          VALUES (
+            'thread-1',
+            ${`turn-${index}`},
+            NULL,
+            NULL,
+            NULL,
+            ${`message-${index}`},
+            'completed',
+            ${iso},
+            ${iso},
+            ${iso},
+            ${index + 1},
+            ${`checkpoint-${index}`},
+            'ready',
+            '[{"path":"README.md","kind":"modified","additions":1,"deletions":0}]'
+          )
+        `;
+      }
+
+      let sequence = 10;
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            ${sequence},
+            '2026-02-24T04:00:00.000Z'
+          )
+        `;
+        sequence += 1;
+      }
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      const thread = snapshot.threads[0];
+
+      assert.isDefined(thread);
+      assert.equal(thread?.messages.length, SNAPSHOT_MAX_THREAD_MESSAGES);
+      assert.equal(thread?.messages[0]?.id, asMessageId("message-3"));
+      assert.equal(thread?.proposedPlans.length, SNAPSHOT_MAX_THREAD_PROPOSED_PLANS);
+      assert.equal(thread?.proposedPlans[0]?.id, "plan-3");
+      assert.equal(thread?.activities.length, SNAPSHOT_MAX_THREAD_ACTIVITIES);
+      assert.equal(thread?.activities[0]?.id, "activity-3");
+      assert.equal(thread?.checkpoints.length, SNAPSHOT_MAX_THREAD_CHECKPOINTS);
+      assert.equal(thread?.checkpoints[0]?.checkpointRef, asCheckpointRef("checkpoint-3"));
     }),
   );
 });

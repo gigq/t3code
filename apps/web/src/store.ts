@@ -1,5 +1,6 @@
 import {
   type OrchestrationEvent,
+  type OrchestrationBootstrapReadModel,
   type OrchestrationMessage,
   type OrchestrationProposedPlan,
   type ProjectId,
@@ -9,9 +10,18 @@ import {
   type OrchestrationSession,
   type OrchestrationCheckpointSummary,
   type OrchestrationThread,
+  type OrchestrationThreadSummary,
+  type OrchestrationThreadSnapshot,
   type OrchestrationSessionStatus,
 } from "@t3tools/contracts";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import {
+  retainMostRecentItems,
+  SNAPSHOT_MAX_THREAD_ACTIVITIES,
+  SNAPSHOT_MAX_THREAD_CHECKPOINTS,
+  SNAPSHOT_MAX_THREAD_MESSAGES,
+  SNAPSHOT_MAX_THREAD_PROPOSED_PLANS,
+} from "@t3tools/shared/threadRetention";
 import { create } from "zustand";
 import {
   findLatestProposedPlan,
@@ -40,10 +50,10 @@ const initialState: AppState = {
   threadIdsByProjectId: {},
   bootstrapComplete: false,
 };
-const MAX_THREAD_MESSAGES = 2_000;
-const MAX_THREAD_CHECKPOINTS = 500;
-const MAX_THREAD_PROPOSED_PLANS = 200;
-const MAX_THREAD_ACTIVITIES = 500;
+const MAX_THREAD_MESSAGES = SNAPSHOT_MAX_THREAD_MESSAGES;
+const MAX_THREAD_CHECKPOINTS = SNAPSHOT_MAX_THREAD_CHECKPOINTS;
+const MAX_THREAD_PROPOSED_PLANS = SNAPSHOT_MAX_THREAD_PROPOSED_PLANS;
+const MAX_THREAD_ACTIVITIES = SNAPSHOT_MAX_THREAD_ACTIVITIES;
 const EMPTY_THREAD_IDS: ThreadId[] = [];
 
 // ── Pure helpers ──────────────────────────────────────────────────────
@@ -156,7 +166,90 @@ function mapTurnDiffSummary(
   };
 }
 
+function deriveThreadSummaryState(input: {
+  latestTurn: Thread["latestTurn"];
+  session: Thread["session"];
+  messages: Thread["messages"];
+  activities: Thread["activities"];
+  proposedPlans: Thread["proposedPlans"];
+}): Pick<
+  Thread,
+  | "latestUserMessageAt"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+  | "hasActionableProposedPlan"
+  | "hasLocallyActiveLatestTurn"
+> {
+  return {
+    latestUserMessageAt: getLatestUserMessageAt(input.messages),
+    hasPendingApprovals: derivePendingApprovals(input.activities).length > 0,
+    hasPendingUserInput: derivePendingUserInputs(input.activities).length > 0,
+    hasActionableProposedPlan: hasActionableProposedPlan(
+      findLatestProposedPlan(input.proposedPlans, input.latestTurn?.turnId ?? null),
+    ),
+    hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+      latestTurn: input.latestTurn,
+      session: input.session,
+      messages: input.messages,
+      activities: input.activities,
+    }),
+  };
+}
+
 function mapThread(thread: OrchestrationThread): Thread {
+  const session = thread.session ? mapSession(thread.session) : null;
+  const messages = Array.from(
+    retainMostRecentItems(thread.messages, MAX_THREAD_MESSAGES),
+    mapMessage,
+  );
+  const proposedPlans = Array.from(
+    retainMostRecentItems(thread.proposedPlans, MAX_THREAD_PROPOSED_PLANS),
+    mapProposedPlan,
+  );
+  const turnDiffSummaries = Array.from(
+    retainMostRecentItems(thread.checkpoints, MAX_THREAD_CHECKPOINTS),
+    mapTurnDiffSummary,
+  );
+  const activities = Array.from(
+    retainMostRecentItems(thread.activities, MAX_THREAD_ACTIVITIES),
+    (activity) => ({ ...activity }),
+  );
+  const summaryState = deriveThreadSummaryState({
+    latestTurn: thread.latestTurn,
+    session,
+    messages,
+    activities,
+    proposedPlans,
+  });
+
+  return {
+    id: thread.id,
+    codexThreadId: null,
+    projectId: thread.projectId,
+    title: thread.title,
+    modelSelection: normalizeModelSelection(thread.modelSelection),
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    autoDeferUntil: thread.autoDeferUntil,
+    session,
+    messages,
+    proposedPlans,
+    error: sanitizeThreadErrorMessage(thread.session?.lastError),
+    createdAt: thread.createdAt,
+    archivedAt: thread.archivedAt,
+    updatedAt: thread.updatedAt,
+    latestTurn: thread.latestTurn,
+    pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    turnDiffSummaries,
+    activities,
+    detailState: "ready",
+    ...summaryState,
+  };
+}
+
+function mapThreadSummary(thread: OrchestrationThreadSummary): Thread {
   return {
     id: thread.id,
     codexThreadId: null,
@@ -167,8 +260,8 @@ function mapThread(thread: OrchestrationThread): Thread {
     interactionMode: thread.interactionMode,
     autoDeferUntil: thread.autoDeferUntil,
     session: thread.session ? mapSession(thread.session) : null,
-    messages: thread.messages.map(mapMessage),
-    proposedPlans: thread.proposedPlans.map(mapProposedPlan),
+    messages: [],
+    proposedPlans: [],
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
@@ -177,8 +270,14 @@ function mapThread(thread: OrchestrationThread): Thread {
     pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
-    turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
-    activities: thread.activities.map((activity) => ({ ...activity })),
+    turnDiffSummaries: [],
+    activities: [],
+    detailState: "summary",
+    latestUserMessageAt: thread.latestUserMessageAt,
+    hasPendingApprovals: thread.hasPendingApprovals,
+    hasPendingUserInput: thread.hasPendingUserInput,
+    hasActionableProposedPlan: thread.hasActionableProposedPlan,
+    hasLocallyActiveLatestTurn: thread.hasLocallyActiveLatestTurn,
   };
 }
 
@@ -225,20 +324,26 @@ function buildSidebarThreadSummary(thread: Thread): SidebarThreadSummary {
     archivedAt: thread.archivedAt,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
-    hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
-      latestTurn: thread.latestTurn,
-      session: thread.session,
-      messages: thread.messages,
-      activities: thread.activities,
-    }),
+    hasLocallyActiveLatestTurn:
+      thread.hasLocallyActiveLatestTurn ??
+      hasLocallyActiveLatestTurn({
+        latestTurn: thread.latestTurn,
+        session: thread.session,
+        messages: thread.messages,
+        activities: thread.activities,
+      }),
     branch: thread.branch,
     worktreePath: thread.worktreePath,
-    latestUserMessageAt: getLatestUserMessageAt(thread.messages),
-    hasPendingApprovals: derivePendingApprovals(thread.activities).length > 0,
-    hasPendingUserInput: derivePendingUserInputs(thread.activities).length > 0,
-    hasActionableProposedPlan: hasActionableProposedPlan(
-      findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId ?? null),
-    ),
+    latestUserMessageAt: thread.latestUserMessageAt ?? getLatestUserMessageAt(thread.messages),
+    hasPendingApprovals:
+      thread.hasPendingApprovals ?? derivePendingApprovals(thread.activities).length > 0,
+    hasPendingUserInput:
+      thread.hasPendingUserInput ?? derivePendingUserInputs(thread.activities).length > 0,
+    hasActionableProposedPlan:
+      thread.hasActionableProposedPlan ??
+      hasActionableProposedPlan(
+        findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId ?? null),
+      ),
   };
 }
 
@@ -603,6 +708,88 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
   };
 }
 
+export function syncBootstrapReadModel(
+  state: AppState,
+  readModel: OrchestrationBootstrapReadModel,
+): AppState {
+  const projects = readModel.projects
+    .filter((project) => project.deletedAt === null)
+    .map(mapProject);
+  const existingThreadsById = new Map(state.threads.map((thread) => [thread.id, thread] as const));
+  const threads = readModel.threads
+    .filter((thread) => thread.deletedAt === null)
+    .map((thread) => {
+      const existing = existingThreadsById.get(thread.id);
+      if (existing?.detailState === "ready") {
+        return Object.assign({}, existing, {
+          title: thread.title,
+          modelSelection: normalizeModelSelection(thread.modelSelection),
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          autoDeferUntil: thread.autoDeferUntil,
+          session: thread.session ? mapSession(thread.session) : null,
+          error: sanitizeThreadErrorMessage(thread.session?.lastError),
+          updatedAt: thread.updatedAt,
+          archivedAt: thread.archivedAt,
+          latestTurn: thread.latestTurn,
+          pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+          latestUserMessageAt: thread.latestUserMessageAt,
+          hasPendingApprovals: thread.hasPendingApprovals,
+          hasPendingUserInput: thread.hasPendingUserInput,
+          hasActionableProposedPlan: thread.hasActionableProposedPlan,
+          hasLocallyActiveLatestTurn: thread.hasLocallyActiveLatestTurn,
+        });
+      }
+      return mapThreadSummary(thread);
+    });
+  const sidebarThreadsById = buildSidebarThreadsById(threads);
+  const threadIdsByProjectId = buildThreadIdsByProjectId(threads);
+  return {
+    ...state,
+    projects,
+    threads,
+    sidebarThreadsById,
+    threadIdsByProjectId,
+    bootstrapComplete: true,
+  };
+}
+
+export function syncThreadSnapshot(
+  state: AppState,
+  snapshot: OrchestrationThreadSnapshot,
+): AppState {
+  if (snapshot.thread === null) {
+    return state;
+  }
+  const nextThread = mapThread(snapshot.thread);
+  const existing = state.threads.find((thread) => thread.id === nextThread.id);
+  const threads = existing
+    ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
+    : [...state.threads, nextThread];
+  const nextSummary = buildSidebarThreadSummary(nextThread);
+  const previousSummary = state.sidebarThreadsById[nextThread.id];
+  const sidebarThreadsById = sidebarThreadSummariesEqual(previousSummary, nextSummary)
+    ? state.sidebarThreadsById
+    : {
+        ...state.sidebarThreadsById,
+        [nextThread.id]: nextSummary,
+      };
+  const threadIdsByProjectId = appendThreadIdByProjectId(
+    state.threadIdsByProjectId,
+    nextThread.projectId,
+    nextThread.id,
+  );
+
+  return {
+    ...state,
+    threads,
+    sidebarThreadsById,
+    threadIdsByProjectId,
+  };
+}
+
 export function applyOrchestrationEvent(state: AppState, event: OrchestrationEvent): AppState {
   switch (event.type) {
     case "project.created": {
@@ -809,6 +996,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
             completedAt: latestTurn.completedAt ?? event.payload.createdAt,
             assistantMessageId: latestTurn.assistantMessageId,
           }),
+          hasLocallyActiveLatestTurn: true,
           updatedAt: event.occurredAt,
         };
       });
@@ -900,17 +1088,27 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           messages: cappedMessages,
           turnDiffSummaries,
           latestTurn,
+          latestUserMessageAt:
+            message.role !== "user"
+              ? (thread.latestUserMessageAt ?? null)
+              : thread.latestUserMessageAt == null || message.createdAt > thread.latestUserMessageAt
+                ? message.createdAt
+                : thread.latestUserMessageAt,
+          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+            latestTurn,
+            session: thread.session,
+            messages: cappedMessages,
+            activities: thread.activities,
+          }),
           updatedAt: event.occurredAt,
         };
       });
     }
 
     case "thread.session-set": {
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        session: mapSession(event.payload.session),
-        error: sanitizeThreadErrorMessage(event.payload.session.lastError),
-        latestTurn:
+      return updateThreadState(state, event.payload.threadId, (thread) => {
+        const session = mapSession(event.payload.session);
+        const latestTurn =
           event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
             ? buildLatestTurn({
                 previous: thread.latestTurn,
@@ -931,27 +1129,47 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
                     : null,
                 sourceProposedPlan: thread.pendingSourceProposedPlan,
               })
-            : thread.latestTurn,
-        updatedAt: event.occurredAt,
-      }));
+            : thread.latestTurn;
+        return {
+          ...thread,
+          session,
+          error: sanitizeThreadErrorMessage(event.payload.session.lastError),
+          latestTurn,
+          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+            latestTurn,
+            session,
+            messages: thread.messages,
+            activities: thread.activities,
+          }),
+          updatedAt: event.occurredAt,
+        };
+      });
     }
 
     case "thread.session-stop-requested": {
-      return updateThreadState(state, event.payload.threadId, (thread) =>
-        thread.session === null
-          ? thread
-          : {
-              ...thread,
-              session: {
-                ...thread.session,
-                status: "closed",
-                orchestrationStatus: "stopped",
-                activeTurnId: undefined,
-                updatedAt: event.payload.createdAt,
-              },
-              updatedAt: event.occurredAt,
-            },
-      );
+      return updateThreadState(state, event.payload.threadId, (thread) => {
+        if (thread.session === null) {
+          return thread;
+        }
+        const stoppedSession = {
+          ...thread.session,
+          status: "closed" as const,
+          orchestrationStatus: "stopped" as const,
+          activeTurnId: undefined,
+          updatedAt: event.payload.createdAt,
+        };
+        return {
+          ...thread,
+          session: stoppedSession,
+          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+            latestTurn: thread.latestTurn,
+            session: stoppedSession,
+            messages: thread.messages,
+            activities: thread.activities,
+          }),
+          updatedAt: event.occurredAt,
+        };
+      });
     }
 
     case "thread.proposed-plan-upserted": {
@@ -969,6 +1187,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         return {
           ...thread,
           proposedPlans,
+          hasActionableProposedPlan: hasActionableProposedPlan(
+            findLatestProposedPlan(proposedPlans, thread.latestTurn?.turnId ?? null),
+          ),
           updatedAt: event.occurredAt,
         };
       });
@@ -1018,6 +1239,12 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           ...thread,
           turnDiffSummaries,
           latestTurn,
+          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+            latestTurn,
+            session: thread.session,
+            messages: thread.messages,
+            activities: thread.activities,
+          }),
           updatedAt: event.occurredAt,
         };
       });
@@ -1070,6 +1297,25 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
                   completedAt: latestCheckpoint.completedAt,
                   assistantMessageId: latestCheckpoint.assistantMessageId ?? null,
                 },
+          ...deriveThreadSummaryState({
+            latestTurn:
+              latestCheckpoint === null
+                ? null
+                : {
+                    turnId: latestCheckpoint.turnId,
+                    state: checkpointStatusToLatestTurnState(
+                      (latestCheckpoint.status ?? "ready") as "ready" | "missing" | "error",
+                    ),
+                    requestedAt: latestCheckpoint.completedAt,
+                    startedAt: latestCheckpoint.completedAt,
+                    completedAt: latestCheckpoint.completedAt,
+                    assistantMessageId: latestCheckpoint.assistantMessageId ?? null,
+                  },
+            session: thread.session,
+            messages,
+            activities,
+            proposedPlans,
+          }),
           updatedAt: event.occurredAt,
         };
       });
@@ -1086,6 +1332,14 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         return {
           ...thread,
           activities,
+          hasPendingApprovals: derivePendingApprovals(activities).length > 0,
+          hasPendingUserInput: derivePendingUserInputs(activities).length > 0,
+          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+            latestTurn: thread.latestTurn,
+            session: thread.session,
+            messages: thread.messages,
+            activities,
+          }),
           updatedAt: event.occurredAt,
         };
       });
@@ -1154,22 +1408,42 @@ export function setThreadBranch(
   });
 }
 
+export function setThreadDetailState(
+  state: AppState,
+  threadId: ThreadId,
+  detailState: NonNullable<Thread["detailState"]>,
+): AppState {
+  return updateThreadState(state, threadId, (thread) =>
+    thread.detailState === detailState ? thread : { ...thread, detailState },
+  );
+}
+
 // ── Zustand store ────────────────────────────────────────────────────
 
 interface AppStore extends AppState {
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  syncBootstrapReadModel: (readModel: OrchestrationBootstrapReadModel) => void;
+  syncThreadSnapshot: (snapshot: OrchestrationThreadSnapshot) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent) => void;
   applyOrchestrationEvents: (events: ReadonlyArray<OrchestrationEvent>) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (threadId: ThreadId, branch: string | null, worktreePath: string | null) => void;
+  setThreadDetailState: (
+    threadId: ThreadId,
+    detailState: NonNullable<Thread["detailState"]>,
+  ) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
   ...initialState,
   syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
+  syncBootstrapReadModel: (readModel) => set((state) => syncBootstrapReadModel(state, readModel)),
+  syncThreadSnapshot: (snapshot) => set((state) => syncThreadSnapshot(state, snapshot)),
   applyOrchestrationEvent: (event) => set((state) => applyOrchestrationEvent(state, event)),
   applyOrchestrationEvents: (events) => set((state) => applyOrchestrationEvents(state, events)),
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadId, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadId, branch, worktreePath)),
+  setThreadDetailState: (threadId, detailState) =>
+    set((state) => setThreadDetailState(state, threadId, detailState)),
 }));

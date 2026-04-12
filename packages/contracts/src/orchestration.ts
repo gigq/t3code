@@ -17,6 +17,8 @@ import {
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
+  getBootstrapSnapshot: "orchestration.getBootstrapSnapshot",
+  getThreadSnapshot: "orchestration.getThreadSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
   importCodexThread: "orchestration.importCodexThread",
   getTurnDiff: "orchestration.getTurnDiff",
@@ -305,6 +307,33 @@ export const OrchestrationThread = Schema.Struct({
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
+export const OrchestrationThreadSummary = Schema.Struct({
+  id: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  autoDeferUntil: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consecutiveAutoNoops: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 0)),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  deletedAt: Schema.NullOr(IsoDateTime),
+  session: Schema.NullOr(OrchestrationSession),
+  latestUserMessageAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  hasPendingApprovals: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  hasPendingUserInput: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  hasActionableProposedPlan: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  hasLocallyActiveLatestTurn: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+});
+export type OrchestrationThreadSummary = typeof OrchestrationThreadSummary.Type;
+
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
@@ -312,6 +341,21 @@ export const OrchestrationReadModel = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
+
+export const OrchestrationBootstrapReadModel = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  projects: Schema.Array(OrchestrationProject),
+  threads: Schema.Array(OrchestrationThreadSummary),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationBootstrapReadModel = typeof OrchestrationBootstrapReadModel.Type;
+
+export const OrchestrationThreadSnapshot = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  thread: Schema.NullOr(OrchestrationThread),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationThreadSnapshot = typeof OrchestrationThreadSnapshot.Type;
 
 export const ProjectCreateCommand = Schema.Struct({
   type: Schema.Literal("project.create"),
@@ -1146,6 +1190,20 @@ export type OrchestrationGetSnapshotInput = typeof OrchestrationGetSnapshotInput
 const OrchestrationGetSnapshotResult = OrchestrationReadModel;
 export type OrchestrationGetSnapshotResult = typeof OrchestrationGetSnapshotResult.Type;
 
+export const OrchestrationGetBootstrapSnapshotInput = Schema.Struct({});
+export type OrchestrationGetBootstrapSnapshotInput =
+  typeof OrchestrationGetBootstrapSnapshotInput.Type;
+const OrchestrationGetBootstrapSnapshotResult = OrchestrationBootstrapReadModel;
+export type OrchestrationGetBootstrapSnapshotResult =
+  typeof OrchestrationGetBootstrapSnapshotResult.Type;
+
+export const OrchestrationGetThreadSnapshotInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationGetThreadSnapshotInput = typeof OrchestrationGetThreadSnapshotInput.Type;
+const OrchestrationGetThreadSnapshotResult = OrchestrationThreadSnapshot;
+export type OrchestrationGetThreadSnapshotResult = typeof OrchestrationGetThreadSnapshotResult.Type;
+
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
   { unsafePreserveChecks: true },
@@ -1197,6 +1255,14 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetSnapshotInput,
     output: OrchestrationGetSnapshotResult,
   },
+  getBootstrapSnapshot: {
+    input: OrchestrationGetBootstrapSnapshotInput,
+    output: OrchestrationGetBootstrapSnapshotResult,
+  },
+  getThreadSnapshot: {
+    input: OrchestrationGetThreadSnapshotInput,
+    output: OrchestrationGetThreadSnapshotResult,
+  },
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
@@ -1221,6 +1287,22 @@ export const OrchestrationRpcSchemas = {
 
 export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetSnapshotError>()(
   "OrchestrationGetSnapshotError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationGetBootstrapSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetBootstrapSnapshotError>()(
+  "OrchestrationGetBootstrapSnapshotError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationGetThreadSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetThreadSnapshotError>()(
+  "OrchestrationGetThreadSnapshotError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

@@ -111,6 +111,12 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  detailState?: "summary" | "loading" | "ready" | "error";
+  latestUserMessageAt?: string | null;
+  hasPendingApprovals?: boolean;
+  hasPendingUserInput?: boolean;
+  hasActionableProposedPlan?: boolean;
+  hasLocallyActiveLatestTurn?: boolean;
 }
 
 export interface SidebarThreadSummary {

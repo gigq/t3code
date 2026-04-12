@@ -7,14 +7,24 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationEvent,
+  type OrchestrationBootstrapReadModel,
   type OrchestrationReadModel,
+  type OrchestrationThreadSnapshot,
 } from "@t3tools/contracts";
+import {
+  SNAPSHOT_MAX_THREAD_ACTIVITIES,
+  SNAPSHOT_MAX_THREAD_CHECKPOINTS,
+  SNAPSHOT_MAX_THREAD_MESSAGES,
+  SNAPSHOT_MAX_THREAD_PROPOSED_PLANS,
+} from "@t3tools/shared/threadRetention";
 import { describe, expect, it } from "vitest";
 
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  syncBootstrapReadModel,
   syncServerReadModel,
+  syncThreadSnapshot,
   type AppState,
 } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
@@ -181,6 +191,79 @@ describe("store read model sync", () => {
     expect(next.bootstrapComplete).toBe(true);
   });
 
+  it("caps bootstrap snapshot history to the retained per-thread limits", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        messages: Array.from({ length: SNAPSHOT_MAX_THREAD_MESSAGES + 3 }, (_, index) => ({
+          id: MessageId.makeUnsafe(`message-${index}`),
+          role: "assistant" as const,
+          text: `message ${index}`,
+          turnId: TurnId.makeUnsafe(`turn-${index}`),
+          streaming: false,
+          createdAt: `2026-02-27T00:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+            index % 60,
+          ).padStart(2, "0")}.000Z`,
+          updatedAt: `2026-02-27T00:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+            index % 60,
+          ).padStart(2, "0")}.000Z`,
+        })),
+        proposedPlans: Array.from(
+          { length: SNAPSHOT_MAX_THREAD_PROPOSED_PLANS + 3 },
+          (_, index) => ({
+            id: `plan-${index}`,
+            turnId: TurnId.makeUnsafe(`turn-${index}`),
+            planMarkdown: `# Plan ${index}`,
+            implementedAt: null,
+            implementationThreadId: null,
+            dismissedAt: null,
+            createdAt: `2026-02-27T01:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+              index % 60,
+            ).padStart(2, "0")}.000Z`,
+            updatedAt: `2026-02-27T01:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+              index % 60,
+            ).padStart(2, "0")}.000Z`,
+          }),
+        ),
+        activities: Array.from({ length: SNAPSHOT_MAX_THREAD_ACTIVITIES + 3 }, (_, index) => ({
+          id: EventId.makeUnsafe(`activity-${index}`),
+          turnId: TurnId.makeUnsafe(`turn-${index}`),
+          tone: "info" as const,
+          kind: "runtime.note",
+          summary: `activity ${index}`,
+          payload: { index },
+          sequence: index,
+          createdAt: `2026-02-27T02:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+            index % 60,
+          ).padStart(2, "0")}.000Z`,
+        })),
+        checkpoints: Array.from({ length: SNAPSHOT_MAX_THREAD_CHECKPOINTS + 3 }, (_, index) => ({
+          turnId: TurnId.makeUnsafe(`turn-${index}`),
+          checkpointTurnCount: index + 1,
+          checkpointRef: CheckpointRef.makeUnsafe(`checkpoint-${index}`),
+          status: "ready" as const,
+          files: [],
+          assistantMessageId: MessageId.makeUnsafe(`message-${index}`),
+          completedAt: `2026-02-27T03:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+            index % 60,
+          ).padStart(2, "0")}.000Z`,
+        })),
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+    const thread = next.threads[0];
+
+    expect(thread?.messages).toHaveLength(SNAPSHOT_MAX_THREAD_MESSAGES);
+    expect(thread?.messages[0]?.id).toBe("message-3");
+    expect(thread?.proposedPlans).toHaveLength(SNAPSHOT_MAX_THREAD_PROPOSED_PLANS);
+    expect(thread?.proposedPlans[0]?.id).toBe("plan-3");
+    expect(thread?.activities).toHaveLength(SNAPSHOT_MAX_THREAD_ACTIVITIES);
+    expect(thread?.activities[0]?.id).toBe("activity-3");
+    expect(thread?.turnDiffSummaries).toHaveLength(SNAPSHOT_MAX_THREAD_CHECKPOINTS);
+    expect(thread?.turnDiffSummaries[0]?.checkpointRef).toBe("checkpoint-3");
+  });
+
   it("preserves claude model slugs without an active session", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
@@ -249,6 +332,111 @@ describe("store read model sync", () => {
     );
 
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
+  });
+
+  it("hydrates summary threads from the bootstrap snapshot and defers detail loading", () => {
+    const initialState = makeState(makeThread());
+    const bootstrapReadModel: OrchestrationBootstrapReadModel = {
+      snapshotSequence: 1,
+      updatedAt: "2026-02-27T00:00:00.000Z",
+      projects: makeReadModel(makeReadModelThread({})).projects,
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.3-codex",
+          },
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
+          branch: "main",
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-02-27T00:00:00.000Z",
+          updatedAt: "2026-02-27T00:05:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          session: null,
+          latestUserMessageAt: "2026-02-27T00:04:00.000Z",
+          hasPendingApprovals: true,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: true,
+          hasLocallyActiveLatestTurn: false,
+        },
+      ],
+    };
+
+    const next = syncBootstrapReadModel(initialState, bootstrapReadModel);
+
+    expect(next.threads[0]?.detailState).toBe("summary");
+    expect(next.threads[0]?.messages).toHaveLength(0);
+    expect(next.sidebarThreadsById["thread-1"]?.hasPendingApprovals).toBe(true);
+    expect(next.sidebarThreadsById["thread-1"]?.hasActionableProposedPlan).toBe(true);
+  });
+
+  it("upgrades a summary thread in place when thread detail arrives", () => {
+    const initialState = syncBootstrapReadModel(makeState(makeThread()), {
+      snapshotSequence: 1,
+      updatedAt: "2026-02-27T00:00:00.000Z",
+      projects: makeReadModel(makeReadModelThread({})).projects,
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.3-codex",
+          },
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
+          branch: null,
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-02-27T00:00:00.000Z",
+          updatedAt: "2026-02-27T00:05:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          hasLocallyActiveLatestTurn: false,
+        },
+      ],
+    });
+    const snapshot: OrchestrationThreadSnapshot = {
+      snapshotSequence: 2,
+      updatedAt: "2026-02-27T00:06:00.000Z",
+      thread: makeReadModelThread({
+        messages: [
+          {
+            id: MessageId.makeUnsafe("message-1"),
+            role: "user",
+            text: "hello",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            streaming: false,
+            createdAt: "2026-02-27T00:05:30.000Z",
+            updatedAt: "2026-02-27T00:05:30.000Z",
+          },
+        ],
+      }),
+    };
+
+    const next = syncThreadSnapshot(initialState, snapshot);
+
+    expect(next.threads[0]?.detailState).toBe("ready");
+    expect(next.threads[0]?.messages).toHaveLength(1);
+    expect(next.sidebarThreadsById["thread-1"]?.latestUserMessageAt).toBe(
+      "2026-02-27T00:05:30.000Z",
+    );
   });
 
   it("replaces projects using snapshot order during recovery", () => {

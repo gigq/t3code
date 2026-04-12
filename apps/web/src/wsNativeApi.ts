@@ -104,6 +104,8 @@ export function createWsNativeApi(): NativeApi {
     },
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,
+      getBootstrapSnapshot: rpcClient.orchestration.getBootstrapSnapshot,
+      getThreadSnapshot: (threadId) => rpcClient.orchestration.getThreadSnapshot({ threadId }),
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       importCodexThread: rpcClient.orchestration.importCodexThread,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,

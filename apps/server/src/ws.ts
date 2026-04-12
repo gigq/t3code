@@ -11,8 +11,10 @@ import {
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
+  OrchestrationGetBootstrapSnapshotError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadSnapshotError,
   OrchestrationGetTurnDiffError,
   OrchestrationImportCodexThreadError,
   ORCHESTRATION_WS_METHODS,
@@ -587,6 +589,34 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new OrchestrationGetSnapshotError({
                   message: "Failed to load orchestration snapshot",
+                  cause,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.getBootstrapSnapshot]: (_input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getBootstrapSnapshot,
+          projectionSnapshotQuery.getBootstrapSnapshot().pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationGetBootstrapSnapshotError({
+                  message: "Failed to load orchestration bootstrap snapshot",
+                  cause,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.getThreadSnapshot]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getThreadSnapshot,
+          projectionSnapshotQuery.getThreadSnapshot(input.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationGetThreadSnapshotError({
+                  message: "Failed to load thread snapshot",
                   cause,
                 }),
             ),

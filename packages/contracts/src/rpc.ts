@@ -36,10 +36,14 @@ import {
   OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
+  OrchestrationGetBootstrapSnapshotError,
+  OrchestrationGetBootstrapSnapshotInput,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
   OrchestrationGetSnapshotInput,
+  OrchestrationGetThreadSnapshotError,
+  OrchestrationGetThreadSnapshotInput,
   OrchestrationImportCodexThreadError,
   OrchestrationImportCodexThreadInput,
   OrchestrationGetTurnDiffError,
@@ -340,6 +344,24 @@ export const WsOrchestrationGetSnapshotRpc = Rpc.make(ORCHESTRATION_WS_METHODS.g
   error: OrchestrationGetSnapshotError,
 });
 
+export const WsOrchestrationGetBootstrapSnapshotRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getBootstrapSnapshot,
+  {
+    payload: OrchestrationGetBootstrapSnapshotInput,
+    success: OrchestrationRpcSchemas.getBootstrapSnapshot.output,
+    error: OrchestrationGetBootstrapSnapshotError,
+  },
+);
+
+export const WsOrchestrationGetThreadSnapshotRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadSnapshot,
+  {
+    payload: OrchestrationGetThreadSnapshotInput,
+    success: OrchestrationRpcSchemas.getThreadSnapshot.output,
+    error: OrchestrationGetThreadSnapshotError,
+  },
+);
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -445,6 +467,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsOrchestrationGetSnapshotRpc,
+  WsOrchestrationGetBootstrapSnapshotRpc,
+  WsOrchestrationGetThreadSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationImportCodexThreadRpc,
   WsOrchestrationGetTurnDiffRpc,

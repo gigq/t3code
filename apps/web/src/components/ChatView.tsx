@@ -908,6 +908,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [draftThread, fallbackDraftProject?.defaultModelSelection, localDraftError, threadId],
   );
   const activeThread = serverThread ?? localDraftThread;
+  const threadDetailState = serverThread?.detailState ?? "ready";
+  const threadDetailPending = threadDetailState === "summary" || threadDetailState === "loading";
   const runtimeMode =
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
@@ -4248,6 +4250,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
               onTouchEnd={onMessagesTouchEnd}
               onTouchCancel={onMessagesTouchEnd}
             >
+              {threadDetailPending && (
+                <div className="mb-3 rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-xs text-muted-foreground">
+                  Loading thread history...
+                </div>
+              )}
               <MessagesTimeline
                 key={activeThread.id}
                 hasMessages={timelineEntries.length > 0}

@@ -63,6 +63,10 @@
     "./projectScripts": {
       "types": "./src/projectScripts.ts",
       "import": "./src/projectScripts.ts"
+    },
+    "./threadRetention": {
+      "types": "./src/threadRetention.ts",
+      "import": "./src/threadRetention.ts"
     }
   },
   "scripts": {

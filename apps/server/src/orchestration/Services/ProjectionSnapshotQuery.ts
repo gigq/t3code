@@ -7,10 +7,11 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
-  ChatAttachment,
+  OrchestrationBootstrapReadModel,
   OrchestrationCheckpointSummary,
   OrchestrationProject,
   OrchestrationReadModel,
+  OrchestrationThreadSnapshot,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -46,6 +47,21 @@ export interface ProjectionSnapshotQueryShape {
   readonly getSnapshot: () => Effect.Effect<OrchestrationReadModel, ProjectionRepositoryError>;
 
   /**
+   * Read a lightweight bootstrap snapshot for client startup.
+   */
+  readonly getBootstrapSnapshot: () => Effect.Effect<
+    OrchestrationBootstrapReadModel,
+    ProjectionRepositoryError
+  >;
+
+  /**
+   * Read the full detail payload for a single thread.
+   */
+  readonly getThreadSnapshot: (
+    threadId: ThreadId,
+  ) => Effect.Effect<OrchestrationThreadSnapshot, ProjectionRepositoryError>;
+
+  /**
    * Read aggregate projection counts without hydrating the full read model.
    */
   readonly getCounts: () => Effect.Effect<ProjectionSnapshotCounts, ProjectionRepositoryError>;
@@ -72,7 +88,7 @@ export interface ProjectionSnapshotQueryShape {
   ) => Effect.Effect<Option.Option<ProjectionThreadCheckpointContext>, ProjectionRepositoryError>;
 
   /**
-   * Read the user/assistant transcript needed to replay a single thread.
+   * Read the thread transcript context needed to replay a single thread.
    */
   readonly getThreadReplayContext: (threadId: ThreadId) => Effect.Effect<
     Option.Option<{
@@ -81,7 +97,7 @@ export interface ProjectionSnapshotQueryShape {
       readonly turns: ReadonlyArray<{
         readonly role: "user" | "assistant";
         readonly text: string;
-        readonly attachments: ReadonlyArray<ChatAttachment>;
+        readonly attachments: ReadonlyArray<import("@t3tools/contracts").ChatAttachment>;
       }>;
     }>,
     ProjectionRepositoryError

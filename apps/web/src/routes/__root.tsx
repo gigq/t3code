@@ -1,7 +1,7 @@
 import {
   OrchestrationEvent,
   type ServerLifecycleWelcomePayload,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import {
   Outlet,
@@ -212,6 +212,11 @@ function coalesceOrchestrationUiEvents(
 const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
 const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
 
+function threadIdFromPathname(pathname: string): ThreadId | null {
+  const parsed = parseThreadIdFromNotificationUrlPath(pathname);
+  return parsed ? ThreadId.makeUnsafe(parsed) : null;
+}
+
 function ServerStateBootstrap() {
   useEffect(() => startServerStateSync(getWsRpcClient().server), []);
 
@@ -220,7 +225,10 @@ function ServerStateBootstrap() {
 
 function EventRouter() {
   const applyOrchestrationEvents = useStore((store) => store.applyOrchestrationEvents);
-  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
+  const bootstrapComplete = useStore((store) => store.bootstrapComplete);
+  const syncBootstrapReadModel = useStore((store) => store.syncBootstrapReadModel);
+  const syncThreadSnapshot = useStore((store) => store.syncThreadSnapshot);
+  const setThreadDetailState = useStore((store) => store.setThreadDetailState);
   const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const syncProjects = useUiStateStore((store) => store.syncProjects);
   const syncThreads = useUiStateStore((store) => store.syncThreads);
@@ -238,6 +246,9 @@ function EventRouter() {
   const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
   const disposedRef = useRef(false);
   const bootstrapFromSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
+  const ensureActiveThreadDetailRef = useRef<
+    (reason: "bootstrap" | "route" | "reconnect") => Promise<void>
+  >(async () => undefined);
   const serverConfig = useServerConfig();
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
@@ -352,6 +363,8 @@ function EventRouter() {
     let disposed = false;
     disposedRef.current = false;
     const recovery = createOrchestrationRecoveryCoordinator();
+    let activeThreadDetailRequest: Promise<void> | null = null;
+    let activeThreadDetailTarget: ThreadId | null = null;
     let replayRetryTracker: import("../orchestrationRecovery").ReplayRetryTracker | null = null;
     let needsProviderInvalidation = false;
     const pendingDomainEvents: OrchestrationEvent[] = [];
@@ -467,6 +480,65 @@ function EventRouter() {
       queueMicrotask(flushPendingDomainEvents);
     };
 
+    const ensureActiveThreadDetail = async (
+      reason: "bootstrap" | "route" | "reconnect",
+    ): Promise<void> => {
+      const activeThreadId = threadIdFromPathname(readPathname());
+      if (activeThreadId === null) {
+        return;
+      }
+
+      const activeThread = useStore
+        .getState()
+        .threads.find((thread) => thread.id === activeThreadId);
+      if (!activeThread || activeThread.detailState === "ready") {
+        return;
+      }
+
+      if (activeThreadDetailRequest && activeThreadDetailTarget === activeThreadId) {
+        return activeThreadDetailRequest;
+      }
+
+      setThreadDetailState(activeThreadId, "loading");
+      activeThreadDetailTarget = activeThreadId;
+      activeThreadDetailRequest = api.orchestration
+        .getThreadSnapshot(activeThreadId)
+        .then((snapshot) => {
+          if (disposed) {
+            return;
+          }
+          syncThreadSnapshot(snapshot);
+          if (snapshot.thread !== null) {
+            reconcileSnapshotDerivedState();
+          } else {
+            setThreadDetailState(activeThreadId, "error");
+          }
+        })
+        .catch((error) => {
+          if (disposed) {
+            return;
+          }
+          setThreadDetailState(activeThreadId, "error");
+          toastManager.add({
+            type: "warning",
+            title: "Failed to load thread history",
+            description:
+              error instanceof Error
+                ? error.message
+                : `Unable to load thread detail after ${reason}.`,
+          });
+        })
+        .finally(() => {
+          if (activeThreadDetailTarget === activeThreadId) {
+            activeThreadDetailTarget = null;
+            activeThreadDetailRequest = null;
+          }
+        });
+
+      return activeThreadDetailRequest;
+    };
+    ensureActiveThreadDetailRef.current = ensureActiveThreadDetail;
+
     const runReplayRecovery = async (reason: "sequence-gap" | "resubscribe"): Promise<void> => {
       if (!recovery.beginReplayRecovery(reason)) {
         return;
@@ -539,17 +611,25 @@ function EventRouter() {
       }
 
       try {
-        const snapshot = await api.orchestration.getSnapshot();
+        const snapshot = await api.orchestration.getBootstrapSnapshot();
         if (!disposed) {
-          syncServerReadModel(snapshot);
+          syncBootstrapReadModel(snapshot);
           reconcileSnapshotDerivedState();
+          await ensureActiveThreadDetail(reason === "bootstrap" ? "bootstrap" : "reconnect");
           if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
             void runReplayRecovery("sequence-gap");
           }
         }
-      } catch {
-        // Keep prior state and wait for welcome or a later replay attempt.
+      } catch (error) {
         recovery.failSnapshotRecovery();
+        toastManager.add({
+          type: "warning",
+          title: "Failed to load thread list",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Unable to load threads from the server snapshot.",
+        });
       }
     };
 
@@ -603,6 +683,7 @@ function EventRouter() {
     };
   }, [
     applyOrchestrationEvents,
+    bootstrapComplete,
     navigate,
     queryClient,
     removeTerminalState,
@@ -611,9 +692,18 @@ function EventRouter() {
     clearThreadUi,
     setProjectExpanded,
     syncProjects,
-    syncServerReadModel,
+    syncBootstrapReadModel,
+    syncThreadSnapshot,
+    setThreadDetailState,
     syncThreads,
   ]);
+
+  useEffect(() => {
+    if (!bootstrapComplete) {
+      return;
+    }
+    void ensureActiveThreadDetailRef.current("route");
+  }, [bootstrapComplete, pathname]);
 
   useServerWelcomeSubscription(handleWelcome);
   useServerConfigUpdatedSubscription(handleServerConfigUpdated);

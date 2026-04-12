@@ -39,6 +39,7 @@ import type {
   WebPushConfig,
   WebPushSubscription,
 } from "./notifications";
+import type { ThreadId } from "./baseSchemas";
 import type {
   TerminalClearInput,
   TerminalCloseInput,
@@ -54,8 +55,10 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationBootstrapReadModel,
   OrchestrationImportCodexThreadInput,
   OrchestrationImportCodexThreadResult,
+  OrchestrationThreadSnapshot,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
@@ -207,6 +210,8 @@ export interface NativeApi {
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
+    getBootstrapSnapshot: () => Promise<OrchestrationBootstrapReadModel>;
+    getThreadSnapshot: (threadId: ThreadId) => Promise<OrchestrationThreadSnapshot>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     importCodexThread: (
       input: OrchestrationImportCodexThreadInput,
