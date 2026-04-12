@@ -30,6 +30,7 @@ import {
   readCodexConfigModelProvider,
 } from "./CodexProvider";
 import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./ClaudeProvider";
+import { checkCopilotProviderStatus } from "./CopilotProvider";
 import { haveProvidersChanged, ProviderRegistryLive } from "./ProviderRegistry";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings";
 import { ProviderRegistry } from "../Services/ProviderRegistry";
@@ -524,11 +525,17 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             Layer.provideMerge(
               mockCommandSpawnerLayer((command, args) => {
                 const joined = args.join(" ");
-                if (joined === "--version") {
+                if (joined === "--version" || joined === "version") {
                   if (command === "codex") {
                     return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
                   }
+                  if (command === "copilot") {
+                    return { stdout: "GitHub Copilot CLI 1.0.12\n", stderr: "", code: 0 };
+                  }
                   return { stdout: "", stderr: "spawn ENOENT", code: 1 };
+                }
+                if (joined === "--help" && command === "copilot") {
+                  return { stdout: "Usage: copilot --acp\n", stderr: "", code: 0 };
                 }
                 if (joined === "login status") {
                   return { stdout: "Logged in\n", stderr: "", code: 0 };
@@ -1010,6 +1017,39 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               if (joined === "auth status")
                 return { stdout: "", stderr: "error: unknown command 'auth'", code: 2 };
               throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+    });
+
+    // ── checkCopilotProviderStatus tests ─────────────────────────
+
+    describe("checkCopilotProviderStatus", () => {
+      it.effect("returns unauthenticated when ACP auth probe requires login", () =>
+        Effect.gen(function* () {
+          const status = yield* checkCopilotProviderStatus(() =>
+            Effect.succeed("unauthenticated" as const),
+          );
+          assert.strictEqual(status.provider, "copilot");
+          assert.strictEqual(status.status, "error");
+          assert.strictEqual(status.installed, true);
+          assert.strictEqual(status.auth.status, "unauthenticated");
+          assert.strictEqual(
+            status.message,
+            "Copilot CLI authentication required. Run `copilot login`.",
+          );
+        }).pipe(
+          Effect.provide(
+            mockCommandSpawnerLayer((command, args) => {
+              const joined = args.join(" ");
+              if (command === "copilot" && (joined === "version" || joined === "--version")) {
+                return { stdout: "GitHub Copilot CLI 1.0.22\n", stderr: "", code: 0 };
+              }
+              if (command === "copilot" && joined === "--help") {
+                return { stdout: "Usage: copilot --acp\n", stderr: "", code: 0 };
+              }
+              throw new Error(`Unexpected ${command} args: ${joined}`);
             }),
           ),
         ),

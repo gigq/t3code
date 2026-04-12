@@ -7,7 +7,7 @@ import {
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
-import { ModelSelection } from "./orchestration";
+import { ClaudeModelSelection, CodexModelSelection } from "./orchestration";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -71,18 +71,31 @@ export const ClaudeSettings = Schema.Struct({
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
+export const CopilotSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  binaryPath: makeBinaryPathSetting("copilot"),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type CopilotSettings = typeof CopilotSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const TextGenerationModelSelection = Schema.Union([
+  CodexModelSelection,
+  ClaudeModelSelection,
+]);
+export type TextGenerationModelSelection = typeof TextGenerationModelSelection.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
   ),
-  textGenerationModelSelection: ModelSelection.pipe(
+  textGenerationModelSelection: TextGenerationModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
       provider: "codex" as const,
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
@@ -93,6 +106,7 @@ export const ServerSettings = Schema.Struct({
   providers: Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    copilot: CopilotSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
 });
@@ -135,7 +149,7 @@ const ClaudeModelOptionsPatch = Schema.Struct({
   contextWindow: Schema.optionalKey(ClaudeModelOptions.fields.contextWindow),
 });
 
-const ModelSelectionPatch = Schema.Union([
+const TextGenerationModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
@@ -161,10 +175,16 @@ const ClaudeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const CopilotSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
-  textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  textGenerationModelSelection: Schema.optionalKey(TextGenerationModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
@@ -175,6 +195,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
+      copilot: Schema.optionalKey(CopilotSettingsPatch),
     }),
   ),
 });

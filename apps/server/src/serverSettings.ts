@@ -13,8 +13,7 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
-  type ModelSelection,
-  type ProviderKind,
+  type TextGenerationModelSelection,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
@@ -91,7 +90,9 @@ export class ServerSettingsService extends ServiceMap.Service<
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 
-const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
+type TextGenerationProviderKind = TextGenerationModelSelection["provider"];
+
+const PROVIDER_ORDER: readonly TextGenerationProviderKind[] = ["codex", "claudeAgent"];
 
 /**
  * Ensure the `textGenerationModelSelection` points to an enabled provider.
@@ -116,7 +117,7 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
     textGenerationModelSelection: {
       provider: fallback,
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback],
-    } as ModelSelection,
+    } satisfies TextGenerationModelSelection,
   };
 }
 

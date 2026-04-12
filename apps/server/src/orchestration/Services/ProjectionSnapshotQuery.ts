@@ -7,6 +7,7 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  ChatAttachment,
   OrchestrationCheckpointSummary,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -69,6 +70,22 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadCheckpointContext: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<ProjectionThreadCheckpointContext>, ProjectionRepositoryError>;
+
+  /**
+   * Read the user/assistant transcript needed to replay a single thread.
+   */
+  readonly getThreadReplayContext: (threadId: ThreadId) => Effect.Effect<
+    Option.Option<{
+      readonly threadId: ThreadId;
+      readonly cwd: string;
+      readonly turns: ReadonlyArray<{
+        readonly role: "user" | "assistant";
+        readonly text: string;
+        readonly attachments: ReadonlyArray<ChatAttachment>;
+      }>;
+    }>,
+    ProjectionRepositoryError
+  >;
 }
 
 /**

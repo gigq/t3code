@@ -229,6 +229,27 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listThreadMessageRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          role,
+          text,
+          attachments_json AS "attachments",
+          is_streaming AS "isStreaming",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_messages
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, message_id ASC
+      `,
+  });
+
   const listThreadProposedPlanRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadProposedPlanDbRowSchema,
@@ -810,12 +831,59 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       });
     });
 
+  const getThreadReplayContext: ProjectionSnapshotQueryShape["getThreadReplayContext"] = (
+    threadId,
+  ) =>
+    Effect.gen(function* () {
+      const threadRow = yield* getThreadCheckpointContextThreadRow({ threadId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getThreadReplayContext:getThread:query",
+            "ProjectionSnapshotQuery.getThreadReplayContext:getThread:decodeRow",
+          ),
+        ),
+      );
+      if (Option.isNone(threadRow)) {
+        return Option.none();
+      }
+
+      const messageRows = yield* listThreadMessageRowsByThread({ threadId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getThreadReplayContext:listMessages:query",
+            "ProjectionSnapshotQuery.getThreadReplayContext:listMessages:decodeRows",
+          ),
+        ),
+      );
+
+      return Option.some({
+        threadId,
+        cwd: threadRow.value.worktreePath ?? threadRow.value.workspaceRoot,
+        turns: messageRows
+          .map((row) => ({
+            role: row.role,
+            text: row.text,
+            attachments: row.attachments ?? [],
+          }))
+          .filter(
+            (
+              message,
+            ): message is {
+              role: "user" | "assistant";
+              text: string;
+              attachments: ReadonlyArray<ChatAttachment>;
+            } => message.role === "user" || message.role === "assistant",
+          ),
+      });
+    });
+
   return {
     getSnapshot,
     getCounts,
     getActiveProjectByWorkspaceRoot,
     getFirstActiveThreadIdByProjectId,
     getThreadCheckpointContext,
+    getThreadReplayContext,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

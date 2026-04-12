@@ -1,5 +1,6 @@
 import {
   type ClaudeModelOptions,
+  type CopilotModelOptions,
   type CodexModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
@@ -52,6 +53,9 @@ function getRawEffort(
   if (provider === "codex") {
     return trimOrNull((modelOptions as CodexModelOptions | undefined)?.reasoningEffort);
   }
+  if (provider === "copilot") {
+    return null;
+  }
   return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.effort);
 }
 
@@ -72,6 +76,12 @@ function buildNextOptions(
 ): ProviderOptions {
   if (provider === "codex") {
     return { ...(modelOptions as CodexModelOptions | undefined), ...patch } as CodexModelOptions;
+  }
+  if (provider === "copilot") {
+    return {
+      ...(modelOptions as CopilotModelOptions | undefined),
+      ...patch,
+    } as CopilotModelOptions;
   }
   return { ...(modelOptions as ClaudeModelOptions | undefined), ...patch } as ClaudeModelOptions;
 }

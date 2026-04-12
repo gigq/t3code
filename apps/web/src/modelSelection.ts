@@ -1,6 +1,6 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  type ModelSelection,
+  type TextGenerationModelSelection,
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -10,6 +10,7 @@ import { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
   getDefaultServerModel,
   getProviderModels,
+  getProviderSnapshot,
   resolveSelectableProvider,
 } from "./providerModels";
 
@@ -44,6 +45,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     description: "Save additional Claude model slugs for the picker and `/model` command.",
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
+  },
+  copilot: {
+    provider: "copilot",
+    title: "Copilot",
+    description: "Save additional Copilot model slugs for the picker and `/model` command.",
+    placeholder: "your-copilot-model-slug",
+    example: "gpt-4.1",
   },
 };
 
@@ -165,35 +173,53 @@ export function getCustomModelOptionsByProvider(
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
     ),
+    copilot: getAppModelOptions(
+      settings,
+      providers,
+      "copilot",
+      selectedProvider === "copilot" ? selectedModel : undefined,
+    ),
   };
 }
 
 export function resolveAppModelSelectionState(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
+): TextGenerationModelSelection {
+  type TextGenerationProvider = TextGenerationModelSelection["provider"];
   const selection = settings.textGenerationModelSelection ?? {
     provider: "codex" as const,
     model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
   };
-  const provider = resolveSelectableProvider(providers, selection.provider);
+  const provider: TextGenerationProvider =
+    selection.provider === "claudeAgent" || selection.provider === "codex"
+      ? selection.provider
+      : "codex";
+  const resolvedProvider: TextGenerationProvider =
+    getProviderSnapshot(providers, provider)?.enabled === false
+      ? ((providers.find(
+          (candidate) =>
+            candidate.enabled &&
+            (candidate.provider === "codex" || candidate.provider === "claudeAgent"),
+        )?.provider as TextGenerationProvider | undefined) ?? provider)
+      : provider;
 
   // When the provider changed due to fallback (e.g. selected provider was disabled),
   // don't carry over the old provider's model — use the fallback provider's default.
-  const selectedModel = provider === selection.provider ? selection.model : null;
-  const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
+  const selectedModel = resolvedProvider === selection.provider ? selection.model : null;
+  const model = resolveAppModelSelection(resolvedProvider, settings, providers, selectedModel);
   const { modelOptionsForDispatch } = getComposerProviderState({
-    provider,
+    provider: resolvedProvider,
     model,
-    models: getProviderModels(providers, provider),
+    models: getProviderModels(providers, resolvedProvider),
     prompt: "",
     modelOptions: {
-      [provider]: provider === selection.provider ? selection.options : undefined,
+      [resolvedProvider]: resolvedProvider === selection.provider ? selection.options : undefined,
     },
   });
 
   return {
-    provider,
+    provider: resolvedProvider,
     model,
     ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
   };

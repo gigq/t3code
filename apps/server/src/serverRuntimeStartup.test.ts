@@ -71,6 +71,7 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
           getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+          getThreadReplayContext: () => Effect.succeed(Option.none()),
         }),
         Effect.provideService(AnalyticsService, {
           record: () => Effect.void,

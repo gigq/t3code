@@ -1541,6 +1541,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
       claudeAgent:
         providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
+      copilot: providerStatuses.find((provider) => provider.provider === "copilot")?.models ?? [],
     }),
     [providerStatuses],
   );

@@ -3,6 +3,7 @@ import {
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
+  type CopilotModelOptions,
   type CodexModelOptions,
   type ModelCapabilities,
   type ModelSelection,
@@ -117,6 +118,13 @@ export function normalizeClaudeModelOptionsWithCapabilities(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
+export function normalizeCopilotModelOptionsWithCapabilities(
+  _caps: ModelCapabilities,
+  _modelOptions: CopilotModelOptions | null | undefined,
+): CopilotModelOptions | undefined {
+  return undefined;
+}
+
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
@@ -216,6 +224,11 @@ export function resolveApiModelId(modelSelection: ModelSelection): string {
         default:
           return modelSelection.model;
       }
+    }
+    case "copilot": {
+      return modelSelection.model === "default"
+        ? DEFAULT_MODEL_BY_PROVIDER.copilot
+        : modelSelection.model;
     }
     default: {
       return modelSelection.model;

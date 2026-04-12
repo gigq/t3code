@@ -114,6 +114,12 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     binaryPlaceholder: "Claude binary path",
     binaryDescription: "Path to the Claude binary",
   },
+  {
+    provider: "copilot",
+    title: "Copilot",
+    binaryPlaceholder: "Copilot binary path",
+    binaryDescription: "Path to the Copilot binary",
+  },
 ] as const;
 
 const PROVIDER_STATUS_STYLES = {
@@ -539,12 +545,18 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
       settings.providers.claudeAgent.customModels.length > 0,
     ),
+    copilot: Boolean(
+      settings.providers.copilot.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.copilot.binaryPath ||
+      settings.providers.copilot.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
     codex: "",
     claudeAgent: "",
+    copilot: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -622,6 +634,13 @@ export function GeneralSettingsPanel() {
   const availableEditors = useServerAvailableEditors();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
+  const textGenerationProviders = useMemo(
+    () =>
+      serverProviders.filter(
+        (provider) => provider.provider === "codex" || provider.provider === "claudeAgent",
+      ),
+    [serverProviders],
+  );
   const codexHomePath = settings.providers.codex.homePath;
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
   const diagnosticsDescription = (() => {
@@ -636,13 +655,16 @@ export function GeneralSettingsPanel() {
     return exports.length > 0 ? `${mode}. OTLP exporting ${exports.join(" and ")}.` : `${mode}.`;
   })();
 
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
+  const textGenerationModelSelection = resolveAppModelSelectionState(
+    settings,
+    textGenerationProviders,
+  );
   const textGenProvider = textGenerationModelSelection.provider;
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
   const gitModelOptionsByProvider = getCustomModelOptionsByProvider(
     settings,
-    serverProviders,
+    textGenerationProviders,
     textGenProvider,
     textGenModel,
   );
@@ -1073,18 +1095,21 @@ export function GeneralSettingsPanel() {
                 provider={textGenProvider}
                 model={textGenModel}
                 lockedProvider={null}
-                providers={serverProviders}
+                providers={textGenerationProviders}
                 modelOptionsByProvider={gitModelOptionsByProvider}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onProviderModelChange={(provider, model) => {
+                  if (provider === "copilot") {
+                    return;
+                  }
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
                         textGenerationModelSelection: { provider, model },
                       },
-                      serverProviders,
+                      textGenerationProviders,
                     ),
                   });
                 }}
@@ -1092,7 +1117,7 @@ export function GeneralSettingsPanel() {
               <TraitsPicker
                 provider={textGenProvider}
                 models={
-                  serverProviders.find((provider) => provider.provider === textGenProvider)
+                  textGenerationProviders.find((provider) => provider.provider === textGenProvider)
                     ?.models ?? []
                 }
                 model={textGenModel}
@@ -1113,7 +1138,7 @@ export function GeneralSettingsPanel() {
                           ...(nextOptions ? { options: nextOptions } : {}),
                         },
                       },
-                      serverProviders,
+                      textGenerationProviders,
                     ),
                   });
                 }}

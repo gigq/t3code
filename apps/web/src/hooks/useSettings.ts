@@ -13,7 +13,7 @@ import { useCallback, useMemo } from "react";
 import {
   ServerSettings,
   ServerSettingsPatch,
-  ModelSelection,
+  TextGenerationModelSelection,
   ThreadEnvMode,
 } from "@t3tools/contracts";
 import {
@@ -144,7 +144,7 @@ export function buildLegacyServerSettingsMigrationPatch(legacySettings: Record<s
     patch.defaultThreadEnvMode = legacySettings.defaultThreadEnvMode;
   }
 
-  if (Schema.is(ModelSelection)(legacySettings.textGenerationModelSelection)) {
+  if (Schema.is(TextGenerationModelSelection)(legacySettings.textGenerationModelSelection)) {
     patch.textGenerationModelSelection = legacySettings.textGenerationModelSelection;
   }
 

@@ -44,10 +44,21 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
 
   return {
     generateCommitMessage: (input) =>
-      route(input.modelSelection.provider).generateCommitMessage(input),
-    generatePrContent: (input) => route(input.modelSelection.provider).generatePrContent(input),
-    generateBranchName: (input) => route(input.modelSelection.provider).generateBranchName(input),
-    generateThreadTitle: (input) => route(input.modelSelection.provider).generateThreadTitle(input),
+      route(
+        input.modelSelection.provider === "claudeAgent" ? "claudeAgent" : "codex",
+      ).generateCommitMessage(input),
+    generatePrContent: (input) =>
+      route(
+        input.modelSelection.provider === "claudeAgent" ? "claudeAgent" : "codex",
+      ).generatePrContent(input),
+    generateBranchName: (input) =>
+      route(
+        input.modelSelection.provider === "claudeAgent" ? "claudeAgent" : "codex",
+      ).generateBranchName(input),
+    generateThreadTitle: (input) =>
+      route(
+        input.modelSelection.provider === "claudeAgent" ? "claudeAgent" : "codex",
+      ).generateThreadTitle(input),
   } satisfies TextGenerationShape;
 });
 
