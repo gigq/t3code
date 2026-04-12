@@ -46,6 +46,7 @@ function formatErrorMessage(error: unknown): string {
 export class WsTransport {
   private readonly tracingReady: Promise<void>;
   private readonly url: string | undefined;
+  private readonly activeSubscriptionRestarts = new Set<() => void>();
   private disposed = false;
   private reconnectChain: Promise<void> = Promise.resolve();
   private session: TransportSession;
@@ -109,6 +110,16 @@ export class WsTransport {
       Duration.fromInputUnsafe(options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS),
     );
     let cancelCurrentStream: () => void = NOOP;
+    let restartRequested = false;
+
+    const requestRestart = () => {
+      if (!active) {
+        return;
+      }
+      restartRequested = true;
+      cancelCurrentStream();
+    };
+    this.activeSubscriptionRestarts.add(requestRestart);
 
     void (async () => {
       for (;;) {
@@ -138,10 +149,18 @@ export class WsTransport {
           cancelCurrentStream = runningStream.cancel;
           await runningStream.completed;
           cancelCurrentStream = NOOP;
+          if (restartRequested) {
+            restartRequested = false;
+            continue;
+          }
         } catch (error) {
           cancelCurrentStream = NOOP;
           if (!active || this.disposed) {
             return;
+          }
+          if (restartRequested) {
+            restartRequested = false;
+            continue;
           }
 
           console.warn("WebSocket RPC subscription disconnected", {
@@ -154,6 +173,7 @@ export class WsTransport {
 
     return () => {
       active = false;
+      this.activeSubscriptionRestarts.delete(requestRestart);
       cancelCurrentStream();
     };
   }
@@ -170,6 +190,9 @@ export class WsTransport {
 
       const previousSession = this.session;
       this.session = this.createSession();
+      for (const restart of this.activeSubscriptionRestarts) {
+        restart();
+      }
       await this.closeSession(previousSession);
     });
 

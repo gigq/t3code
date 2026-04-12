@@ -439,6 +439,354 @@ describe("store read model sync", () => {
     );
   });
 
+  it("normalizes stale running sessions in thread snapshots once the latest turn is already completed", () => {
+    const state = makeState(makeThread());
+    const snapshot: OrchestrationThreadSnapshot = {
+      snapshotSequence: 2,
+      updatedAt: "2026-02-27T00:06:00.000Z",
+      thread: makeReadModelThread({
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-1"),
+          state: "completed",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:01.000Z",
+          completedAt: "2026-02-27T00:00:04.000Z",
+          assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+        },
+        messages: [
+          {
+            id: MessageId.makeUnsafe("assistant-1"),
+            role: "assistant",
+            text: "done",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            streaming: false,
+            createdAt: "2026-02-27T00:00:02.000Z",
+            updatedAt: "2026-02-27T00:00:04.000Z",
+          },
+        ],
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: TurnId.makeUnsafe("turn-1"),
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:03.000Z",
+        },
+      }),
+    };
+
+    const next = syncThreadSnapshot(state, snapshot);
+
+    expect(next.threads[0]?.session?.status).toBe("ready");
+    expect(next.threads[0]?.session?.activeTurnId).toBeUndefined();
+    expect(next.threads[0]?.latestTurn?.state).toBe("completed");
+  });
+
+  it("merges stale thread detail snapshots without clobbering newer live events", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const turnId = TurnId.makeUnsafe("turn-1");
+    const initialState = syncBootstrapReadModel(makeState(makeThread()), {
+      snapshotSequence: 1,
+      updatedAt: "2026-02-27T00:00:00.000Z",
+      projects: makeReadModel(makeReadModelThread({})).projects,
+      threads: [
+        {
+          id: threadId,
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.3-codex",
+          },
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
+          branch: null,
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-02-27T00:00:00.000Z",
+          updatedAt: "2026-02-27T00:05:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          hasLocallyActiveLatestTurn: false,
+        },
+      ],
+    });
+    const liveState = applyOrchestrationEvents(initialState, [
+      makeEvent(
+        "thread.session-set",
+        {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-02-27T00:07:00.000Z",
+          },
+        },
+        { occurredAt: "2026-02-27T00:07:00.000Z" },
+      ),
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId,
+          messageId: MessageId.makeUnsafe("message-live"),
+          role: "user",
+          text: "latest prompt",
+          turnId,
+          streaming: false,
+          createdAt: "2026-02-27T00:07:01.000Z",
+          updatedAt: "2026-02-27T00:07:01.000Z",
+        },
+        { occurredAt: "2026-02-27T00:07:01.000Z", sequence: 2 },
+      ),
+    ]);
+    const staleSnapshot: OrchestrationThreadSnapshot = {
+      snapshotSequence: 2,
+      updatedAt: "2026-02-27T00:06:00.000Z",
+      thread: makeReadModelThread({
+        updatedAt: "2026-02-27T00:06:00.000Z",
+        messages: [
+          {
+            id: MessageId.makeUnsafe("message-older"),
+            role: "assistant",
+            text: "older context",
+            turnId: TurnId.makeUnsafe("turn-older"),
+            streaming: false,
+            createdAt: "2026-02-27T00:04:00.000Z",
+            updatedAt: "2026-02-27T00:04:00.000Z",
+          },
+        ],
+      }),
+    };
+
+    const next = syncThreadSnapshot(liveState, staleSnapshot);
+
+    expect(next.threads[0]?.detailState).toBe("ready");
+    expect(next.threads[0]?.updatedAt).toBe("2026-02-27T00:07:01.000Z");
+    expect(next.threads[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "running",
+    });
+    expect(next.threads[0]?.messages.map((message) => message.id)).toEqual([
+      MessageId.makeUnsafe("message-older"),
+      MessageId.makeUnsafe("message-live"),
+    ]);
+  });
+
+  it("prefers finalized snapshot messages over stale local streaming copies", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const turnId = TurnId.makeUnsafe("turn-1");
+    const messageId = MessageId.makeUnsafe("assistant-1");
+    const liveState = makeState(
+      makeThread({
+        id: threadId,
+        updatedAt: "2026-02-27T00:07:00.000Z",
+        latestTurn: {
+          turnId,
+          state: "completed",
+          requestedAt: "2026-02-27T00:06:00.000Z",
+          startedAt: "2026-02-27T00:06:01.000Z",
+          completedAt: "2026-02-27T00:06:04.000Z",
+          assistantMessageId: messageId,
+        },
+        session: {
+          provider: "codex",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-02-27T00:06:00.000Z",
+          updatedAt: "2026-02-27T00:06:04.000Z",
+        },
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Hello",
+            turnId,
+            createdAt: "2026-02-27T00:06:02.000Z",
+            streaming: true,
+          },
+        ],
+        activities: [],
+        hasLocallyActiveLatestTurn: true,
+      }),
+    );
+    const staleSnapshot: OrchestrationThreadSnapshot = {
+      snapshotSequence: 2,
+      updatedAt: "2026-02-27T00:06:30.000Z",
+      thread: makeReadModelThread({
+        id: threadId,
+        updatedAt: "2026-02-27T00:06:30.000Z",
+        latestTurn: {
+          turnId,
+          state: "completed",
+          requestedAt: "2026-02-27T00:06:00.000Z",
+          startedAt: "2026-02-27T00:06:01.000Z",
+          completedAt: "2026-02-27T00:06:04.000Z",
+          assistantMessageId: messageId,
+        },
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-02-27T00:06:04.000Z",
+        },
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Hello there",
+            turnId,
+            streaming: false,
+            createdAt: "2026-02-27T00:06:02.000Z",
+            updatedAt: "2026-02-27T00:06:04.000Z",
+          },
+        ],
+        activities: [],
+      }),
+    };
+
+    const next = syncThreadSnapshot(liveState, staleSnapshot);
+
+    expect(next.threads[0]?.messages).toEqual([
+      expect.objectContaining({
+        id: messageId,
+        text: "Hello there",
+        streaming: false,
+        completedAt: "2026-02-27T00:06:04.000Z",
+      }),
+    ]);
+    expect(next.threads[0]?.hasLocallyActiveLatestTurn).toBe(false);
+  });
+
+  it("does not let a stale bootstrap summary clobber newer live thread state", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const turnId = TurnId.makeUnsafe("turn-1");
+    const liveState = applyOrchestrationEvents(
+      syncBootstrapReadModel(makeState(makeThread()), {
+        snapshotSequence: 1,
+        updatedAt: "2026-02-27T00:00:00.000Z",
+        projects: makeReadModel(makeReadModelThread({})).projects,
+        threads: [
+          {
+            id: threadId,
+            projectId: ProjectId.makeUnsafe("project-1"),
+            title: "Thread",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+            runtimeMode: DEFAULT_RUNTIME_MODE,
+            interactionMode: DEFAULT_INTERACTION_MODE,
+            autoDeferUntil: null,
+            consecutiveAutoNoops: 0,
+            branch: null,
+            worktreePath: null,
+            latestTurn: null,
+            createdAt: "2026-02-27T00:00:00.000Z",
+            updatedAt: "2026-02-27T00:05:00.000Z",
+            archivedAt: null,
+            deletedAt: null,
+            session: null,
+            latestUserMessageAt: null,
+            hasPendingApprovals: false,
+            hasPendingUserInput: false,
+            hasActionableProposedPlan: false,
+            hasLocallyActiveLatestTurn: false,
+          },
+        ],
+      }),
+      [
+        makeEvent(
+          "thread.session-set",
+          {
+            threadId,
+            session: {
+              threadId,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: turnId,
+              lastError: null,
+              updatedAt: "2026-02-27T00:07:00.000Z",
+            },
+          },
+          { occurredAt: "2026-02-27T00:07:00.000Z" },
+        ),
+        makeEvent(
+          "thread.message-sent",
+          {
+            threadId,
+            messageId: MessageId.makeUnsafe("message-live"),
+            role: "user",
+            text: "latest prompt",
+            turnId,
+            streaming: false,
+            createdAt: "2026-02-27T00:07:01.000Z",
+            updatedAt: "2026-02-27T00:07:01.000Z",
+          },
+          { occurredAt: "2026-02-27T00:07:01.000Z", sequence: 2 },
+        ),
+      ],
+    );
+
+    const next = syncBootstrapReadModel(liveState, {
+      snapshotSequence: 2,
+      updatedAt: "2026-02-27T00:06:00.000Z",
+      projects: makeReadModel(makeReadModelThread({})).projects,
+      threads: [
+        {
+          id: threadId,
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.3-codex",
+          },
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          autoDeferUntil: null,
+          consecutiveAutoNoops: 0,
+          branch: null,
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-02-27T00:00:00.000Z",
+          updatedAt: "2026-02-27T00:06:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          hasLocallyActiveLatestTurn: false,
+        },
+      ],
+    });
+
+    expect(next.threads[0]?.updatedAt).toBe("2026-02-27T00:07:01.000Z");
+    expect(next.threads[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "running",
+    });
+    expect(next.threads[0]?.messages.map((message) => message.id)).toEqual([
+      MessageId.makeUnsafe("message-live"),
+    ]);
+  });
+
   it("replaces projects using snapshot order during recovery", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
@@ -759,9 +1107,66 @@ describe("incremental orchestration updates", () => {
       ),
     ]);
 
-    expect(next.threads[0]?.session?.status).toBe("running");
+    expect(next.threads[0]?.session?.status).toBe("ready");
     expect(next.threads[0]?.latestTurn?.state).toBe("completed");
     expect(next.threads[0]?.messages).toHaveLength(1);
+  });
+
+  it("ignores a stale running session update when the same turn is already completed", () => {
+    const state = makeState(
+      makeThread({
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-1"),
+          state: "completed",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:01.000Z",
+          completedAt: "2026-02-27T00:00:04.000Z",
+          assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+        },
+        messages: [
+          {
+            id: MessageId.makeUnsafe("assistant-1"),
+            role: "assistant",
+            text: "done",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            createdAt: "2026-02-27T00:00:02.000Z",
+            completedAt: "2026-02-27T00:00:04.000Z",
+            streaming: false,
+          },
+        ],
+        session: {
+          provider: "codex",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-02-27T00:00:00.000Z",
+          updatedAt: "2026-02-27T00:00:04.000Z",
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.session-set", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: TurnId.makeUnsafe("turn-1"),
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:05.000Z",
+        },
+      }),
+    );
+
+    expect(next.threads[0]?.session?.status).toBe("ready");
+    expect(next.threads[0]?.session?.activeTurnId).toBeUndefined();
+    expect(next.threads[0]?.latestTurn).toMatchObject({
+      turnId: TurnId.makeUnsafe("turn-1"),
+      state: "completed",
+      completedAt: "2026-02-27T00:00:04.000Z",
+    });
   });
 
   it("does not regress latestTurn when an older turn diff completes late", () => {

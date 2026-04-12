@@ -683,7 +683,6 @@ function EventRouter() {
     };
   }, [
     applyOrchestrationEvents,
-    bootstrapComplete,
     navigate,
     queryClient,
     removeTerminalState,

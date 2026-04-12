@@ -117,6 +117,45 @@ function mapSession(session: OrchestrationSession): Thread["session"] {
   };
 }
 
+function shouldTreatSessionAsStaleRunning(input: {
+  session: Thread["session"];
+  latestTurn: Thread["latestTurn"];
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "streaming" | "turnId">>;
+}): boolean {
+  if (
+    input.session?.status !== "running" ||
+    input.session.activeTurnId === undefined ||
+    input.latestTurn?.turnId !== input.session.activeTurnId ||
+    input.latestTurn.completedAt === null
+  ) {
+    return false;
+  }
+
+  return !input.messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.turnId === input.session?.activeTurnId &&
+      message.streaming,
+  );
+}
+
+function normalizeSessionAgainstLatestTurn(input: {
+  session: Thread["session"];
+  latestTurn: Thread["latestTurn"];
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "streaming" | "turnId">>;
+}): Thread["session"] {
+  if (!input.session || !shouldTreatSessionAsStaleRunning(input)) {
+    return input.session;
+  }
+
+  return {
+    ...input.session,
+    status: "ready",
+    orchestrationStatus: "ready",
+    activeTurnId: undefined,
+  };
+}
+
 function mapMessage(message: OrchestrationMessage): ChatMessage {
   const attachments = message.attachments?.map((attachment) => ({
     type: "image" as const,
@@ -164,6 +203,124 @@ function mapTurnDiffSummary(
     checkpointRef: checkpoint.checkpointRef,
     files: checkpoint.files.map((file) => ({ ...file })),
   };
+}
+
+function mergeByKey<T>(
+  base: ReadonlyArray<T>,
+  overlay: ReadonlyArray<T>,
+  getKey: (item: T) => string,
+): T[] {
+  const merged = new Map<string, T>();
+  for (const item of base) {
+    merged.set(getKey(item), item);
+  }
+  for (const item of overlay) {
+    merged.set(getKey(item), item);
+  }
+  return Array.from(merged.values());
+}
+
+function mergeMessage(
+  snapshotMessage: Thread["messages"][number],
+  existingMessage: Thread["messages"][number],
+): Thread["messages"][number] {
+  const snapshotCompletedAt = snapshotMessage.completedAt;
+  const existingCompletedAt = existingMessage.completedAt;
+  const snapshotIsFinal = !snapshotMessage.streaming || snapshotCompletedAt !== undefined;
+  const existingIsFinal = !existingMessage.streaming || existingCompletedAt !== undefined;
+
+  let preferred = existingMessage;
+  let fallback = snapshotMessage;
+
+  if (snapshotIsFinal !== existingIsFinal) {
+    preferred = snapshotIsFinal ? snapshotMessage : existingMessage;
+    fallback = snapshotIsFinal ? existingMessage : snapshotMessage;
+  } else if (snapshotCompletedAt !== undefined || existingCompletedAt !== undefined) {
+    const preferredSnapshot =
+      snapshotCompletedAt !== undefined &&
+      (existingCompletedAt === undefined || snapshotCompletedAt >= existingCompletedAt);
+    preferred = preferredSnapshot ? snapshotMessage : existingMessage;
+    fallback = preferredSnapshot ? existingMessage : snapshotMessage;
+  } else if (snapshotMessage.text.length > existingMessage.text.length) {
+    preferred = snapshotMessage;
+    fallback = existingMessage;
+  }
+
+  const mergedCompletedAt =
+    snapshotCompletedAt !== undefined &&
+    (existingCompletedAt === undefined || snapshotCompletedAt >= existingCompletedAt)
+      ? snapshotCompletedAt
+      : existingCompletedAt;
+
+  return {
+    ...fallback,
+    ...preferred,
+    text: preferred.text.length >= fallback.text.length ? preferred.text : fallback.text,
+    createdAt:
+      snapshotMessage.createdAt <= existingMessage.createdAt
+        ? snapshotMessage.createdAt
+        : existingMessage.createdAt,
+    streaming: mergedCompletedAt !== undefined ? false : preferred.streaming,
+    ...((preferred.turnId ?? fallback.turnId) !== undefined
+      ? { turnId: preferred.turnId ?? fallback.turnId }
+      : {}),
+    ...((preferred.attachments ?? fallback.attachments) !== undefined
+      ? { attachments: preferred.attachments ?? fallback.attachments }
+      : {}),
+    ...(mergedCompletedAt !== undefined ? { completedAt: mergedCompletedAt } : {}),
+  };
+}
+
+function mergeMessages(
+  snapshotMessages: Thread["messages"],
+  existingMessages: Thread["messages"],
+): Thread["messages"] {
+  const merged = new Map<string, Thread["messages"][number]>();
+
+  for (const message of snapshotMessages) {
+    merged.set(message.id, message);
+  }
+  for (const message of existingMessages) {
+    const existing = merged.get(message.id);
+    merged.set(message.id, existing ? mergeMessage(existing, message) : message);
+  }
+
+  return Array.from(merged.values()).toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+}
+
+function mergeProposedPlans(
+  snapshotPlans: Thread["proposedPlans"],
+  existingPlans: Thread["proposedPlans"],
+): Thread["proposedPlans"] {
+  return mergeByKey(snapshotPlans, existingPlans, (plan) => plan.id).toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+}
+
+function mergeTurnDiffSummaries(
+  snapshotSummaries: Thread["turnDiffSummaries"],
+  existingSummaries: Thread["turnDiffSummaries"],
+): Thread["turnDiffSummaries"] {
+  return mergeByKey(snapshotSummaries, existingSummaries, (summary) => summary.turnId).toSorted(
+    (left, right) =>
+      (left.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER) -
+        (right.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER) ||
+      left.completedAt.localeCompare(right.completedAt) ||
+      left.turnId.localeCompare(right.turnId),
+  );
+}
+
+function mergeActivities(
+  snapshotActivities: Thread["activities"],
+  existingActivities: Thread["activities"],
+): Thread["activities"] {
+  return mergeByKey(snapshotActivities, existingActivities, (activity) => activity.id).toSorted(
+    compareActivities,
+  );
 }
 
 function deriveThreadSummaryState(input: {
@@ -214,9 +371,15 @@ function mapThread(thread: OrchestrationThread): Thread {
     retainMostRecentItems(thread.activities, MAX_THREAD_ACTIVITIES),
     (activity) => ({ ...activity }),
   );
-  const summaryState = deriveThreadSummaryState({
-    latestTurn: thread.latestTurn,
+  const latestTurn = thread.latestTurn;
+  const normalizedSession = normalizeSessionAgainstLatestTurn({
     session,
+    latestTurn,
+    messages,
+  });
+  const summaryState = deriveThreadSummaryState({
+    latestTurn,
+    session: normalizedSession,
     messages,
     activities,
     proposedPlans,
@@ -231,15 +394,15 @@ function mapThread(thread: OrchestrationThread): Thread {
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
     autoDeferUntil: thread.autoDeferUntil,
-    session,
+    session: normalizedSession,
     messages,
     proposedPlans,
-    error: sanitizeThreadErrorMessage(thread.session?.lastError),
+    error: sanitizeThreadErrorMessage(normalizedSession?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
     updatedAt: thread.updatedAt,
-    latestTurn: thread.latestTurn,
-    pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
+    latestTurn,
+    pendingSourceProposedPlan: latestTurn?.sourceProposedPlan,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     turnDiffSummaries,
@@ -249,7 +412,72 @@ function mapThread(thread: OrchestrationThread): Thread {
   };
 }
 
+function mergeThreadSnapshot(existing: Thread, snapshotThread: Thread): Thread {
+  const snapshotIsStale =
+    existing.updatedAt !== undefined &&
+    snapshotThread.updatedAt !== undefined &&
+    existing.updatedAt > snapshotThread.updatedAt;
+
+  if (!snapshotIsStale) {
+    return snapshotThread;
+  }
+
+  const messages = mergeMessages(snapshotThread.messages, existing.messages).slice(
+    -MAX_THREAD_MESSAGES,
+  );
+  const proposedPlans = mergeProposedPlans(
+    snapshotThread.proposedPlans,
+    existing.proposedPlans,
+  ).slice(-MAX_THREAD_PROPOSED_PLANS);
+  const turnDiffSummaries = mergeTurnDiffSummaries(
+    snapshotThread.turnDiffSummaries,
+    existing.turnDiffSummaries,
+  ).slice(-MAX_THREAD_CHECKPOINTS);
+  const activities = mergeActivities(snapshotThread.activities, existing.activities).slice(
+    -MAX_THREAD_ACTIVITIES,
+  );
+  const latestTurn = existing.latestTurn;
+  const session = existing.session;
+  const summaryState = deriveThreadSummaryState({
+    latestTurn,
+    session,
+    messages,
+    activities,
+    proposedPlans,
+  });
+
+  return {
+    ...snapshotThread,
+    title: existing.title,
+    modelSelection: existing.modelSelection,
+    runtimeMode: existing.runtimeMode,
+    interactionMode: existing.interactionMode,
+    autoDeferUntil: existing.autoDeferUntil,
+    session,
+    messages,
+    proposedPlans,
+    error: existing.error,
+    archivedAt: existing.archivedAt,
+    updatedAt: existing.updatedAt,
+    latestTurn,
+    pendingSourceProposedPlan:
+      existing.pendingSourceProposedPlan ?? snapshotThread.pendingSourceProposedPlan,
+    branch: existing.branch,
+    worktreePath: existing.worktreePath,
+    turnDiffSummaries,
+    activities,
+    detailState: "ready",
+    ...summaryState,
+  };
+}
+
 function mapThreadSummary(thread: OrchestrationThreadSummary): Thread {
+  const latestTurn = thread.latestTurn;
+  const session = normalizeSessionAgainstLatestTurn({
+    session: thread.session ? mapSession(thread.session) : null,
+    latestTurn,
+    messages: [],
+  });
   return {
     id: thread.id,
     codexThreadId: null,
@@ -259,15 +487,15 @@ function mapThreadSummary(thread: OrchestrationThreadSummary): Thread {
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
     autoDeferUntil: thread.autoDeferUntil,
-    session: thread.session ? mapSession(thread.session) : null,
+    session,
     messages: [],
     proposedPlans: [],
-    error: sanitizeThreadErrorMessage(thread.session?.lastError),
+    error: sanitizeThreadErrorMessage(session?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
     updatedAt: thread.updatedAt,
-    latestTurn: thread.latestTurn,
-    pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
+    latestTurn,
+    pendingSourceProposedPlan: latestTurn?.sourceProposedPlan,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     turnDiffSummaries: [],
@@ -279,6 +507,49 @@ function mapThreadSummary(thread: OrchestrationThreadSummary): Thread {
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     hasLocallyActiveLatestTurn: thread.hasLocallyActiveLatestTurn,
   };
+}
+
+function mergeThreadSummary(existing: Thread, summaryThread: Thread): Thread {
+  const summaryIsStale =
+    existing.updatedAt !== undefined &&
+    summaryThread.updatedAt !== undefined &&
+    existing.updatedAt > summaryThread.updatedAt;
+
+  if (summaryIsStale) {
+    return existing;
+  }
+
+  if (existing.detailState === "ready") {
+    return Object.assign({}, existing, {
+      title: summaryThread.title,
+      modelSelection: summaryThread.modelSelection,
+      runtimeMode: summaryThread.runtimeMode,
+      interactionMode: summaryThread.interactionMode,
+      autoDeferUntil: summaryThread.autoDeferUntil,
+      session: summaryThread.session,
+      error: summaryThread.error,
+      updatedAt: summaryThread.updatedAt,
+      archivedAt: summaryThread.archivedAt,
+      latestTurn: summaryThread.latestTurn,
+      pendingSourceProposedPlan: summaryThread.pendingSourceProposedPlan,
+      branch: summaryThread.branch,
+      worktreePath: summaryThread.worktreePath,
+      latestUserMessageAt: summaryThread.latestUserMessageAt,
+      hasPendingApprovals: summaryThread.hasPendingApprovals,
+      hasPendingUserInput: summaryThread.hasPendingUserInput,
+      hasActionableProposedPlan: summaryThread.hasActionableProposedPlan,
+      hasLocallyActiveLatestTurn: summaryThread.hasLocallyActiveLatestTurn,
+    });
+  }
+
+  if (existing.detailState !== undefined) {
+    return {
+      ...summaryThread,
+      detailState: existing.detailState,
+    };
+  }
+
+  return summaryThread;
 }
 
 function mapProject(project: OrchestrationReadModel["projects"][number]): Project {
@@ -720,29 +991,11 @@ export function syncBootstrapReadModel(
     .filter((thread) => thread.deletedAt === null)
     .map((thread) => {
       const existing = existingThreadsById.get(thread.id);
-      if (existing?.detailState === "ready") {
-        return Object.assign({}, existing, {
-          title: thread.title,
-          modelSelection: normalizeModelSelection(thread.modelSelection),
-          runtimeMode: thread.runtimeMode,
-          interactionMode: thread.interactionMode,
-          autoDeferUntil: thread.autoDeferUntil,
-          session: thread.session ? mapSession(thread.session) : null,
-          error: sanitizeThreadErrorMessage(thread.session?.lastError),
-          updatedAt: thread.updatedAt,
-          archivedAt: thread.archivedAt,
-          latestTurn: thread.latestTurn,
-          pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
-          branch: thread.branch,
-          worktreePath: thread.worktreePath,
-          latestUserMessageAt: thread.latestUserMessageAt,
-          hasPendingApprovals: thread.hasPendingApprovals,
-          hasPendingUserInput: thread.hasPendingUserInput,
-          hasActionableProposedPlan: thread.hasActionableProposedPlan,
-          hasLocallyActiveLatestTurn: thread.hasLocallyActiveLatestTurn,
-        });
+      const nextSummaryThread = mapThreadSummary(thread);
+      if (existing) {
+        return mergeThreadSummary(existing, nextSummaryThread);
       }
-      return mapThreadSummary(thread);
+      return nextSummaryThread;
     });
   const sidebarThreadsById = buildSidebarThreadsById(threads);
   const threadIdsByProjectId = buildThreadIdsByProjectId(threads);
@@ -765,21 +1018,22 @@ export function syncThreadSnapshot(
   }
   const nextThread = mapThread(snapshot.thread);
   const existing = state.threads.find((thread) => thread.id === nextThread.id);
+  const mergedThread = existing ? mergeThreadSnapshot(existing, nextThread) : nextThread;
   const threads = existing
-    ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
-    : [...state.threads, nextThread];
-  const nextSummary = buildSidebarThreadSummary(nextThread);
-  const previousSummary = state.sidebarThreadsById[nextThread.id];
+    ? state.threads.map((thread) => (thread.id === mergedThread.id ? mergedThread : thread))
+    : [...state.threads, mergedThread];
+  const nextSummary = buildSidebarThreadSummary(mergedThread);
+  const previousSummary = state.sidebarThreadsById[mergedThread.id];
   const sidebarThreadsById = sidebarThreadSummariesEqual(previousSummary, nextSummary)
     ? state.sidebarThreadsById
     : {
         ...state.sidebarThreadsById,
-        [nextThread.id]: nextSummary,
+        [mergedThread.id]: nextSummary,
       };
   const threadIdsByProjectId = appendThreadIdByProjectId(
     state.threadIdsByProjectId,
-    nextThread.projectId,
-    nextThread.id,
+    mergedThread.projectId,
+    mergedThread.id,
   );
 
   return {
@@ -791,513 +1045,525 @@ export function syncThreadSnapshot(
 }
 
 export function applyOrchestrationEvent(state: AppState, event: OrchestrationEvent): AppState {
-  switch (event.type) {
-    case "project.created": {
-      const existingIndex = state.projects.findIndex(
-        (project) =>
-          project.id === event.payload.projectId || project.cwd === event.payload.workspaceRoot,
-      );
-      const nextProject = mapProject({
-        id: event.payload.projectId,
-        title: event.payload.title,
-        workspaceRoot: event.payload.workspaceRoot,
-        defaultModelSelection: event.payload.defaultModelSelection,
-        scripts: event.payload.scripts,
-        createdAt: event.payload.createdAt,
-        updatedAt: event.payload.updatedAt,
-        deletedAt: null,
-      });
-      const projects =
-        existingIndex >= 0
-          ? state.projects.map((project, index) =>
-              index === existingIndex ? nextProject : project,
-            )
-          : [...state.projects, nextProject];
-      return { ...state, projects };
-    }
-
-    case "project.meta-updated": {
-      const projects = updateProject(state.projects, event.payload.projectId, (project) => ({
-        ...project,
-        ...(event.payload.title !== undefined ? { name: event.payload.title } : {}),
-        ...(event.payload.workspaceRoot !== undefined ? { cwd: event.payload.workspaceRoot } : {}),
-        ...(event.payload.defaultModelSelection !== undefined
-          ? {
-              defaultModelSelection: event.payload.defaultModelSelection
-                ? normalizeModelSelection(event.payload.defaultModelSelection)
-                : null,
-            }
-          : {}),
-        ...(event.payload.scripts !== undefined
-          ? { scripts: mapProjectScripts(event.payload.scripts) }
-          : {}),
-        updatedAt: event.payload.updatedAt,
-      }));
-      return projects === state.projects ? state : { ...state, projects };
-    }
-
-    case "project.deleted": {
-      const projects = state.projects.filter((project) => project.id !== event.payload.projectId);
-      return projects.length === state.projects.length ? state : { ...state, projects };
-    }
-
-    case "thread.created": {
-      const existing = state.threads.find((thread) => thread.id === event.payload.threadId);
-      const nextThread = mapThread({
-        id: event.payload.threadId,
-        projectId: event.payload.projectId,
-        title: event.payload.title,
-        modelSelection: event.payload.modelSelection,
-        runtimeMode: event.payload.runtimeMode,
-        interactionMode: event.payload.interactionMode,
-        autoDeferUntil: event.payload.autoDeferUntil,
-        consecutiveAutoNoops: event.payload.consecutiveAutoNoops,
-        branch: event.payload.branch,
-        worktreePath: event.payload.worktreePath,
-        latestTurn: null,
-        createdAt: event.payload.createdAt,
-        updatedAt: event.payload.updatedAt,
-        archivedAt: null,
-        deletedAt: null,
-        messages: [],
-        proposedPlans: [],
-        activities: [],
-        checkpoints: [],
-        session: null,
-      });
-      const threads = existing
-        ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
-        : [...state.threads, nextThread];
-      const nextSummary = buildSidebarThreadSummary(nextThread);
-      const previousSummary = state.sidebarThreadsById[nextThread.id];
-      const sidebarThreadsById = sidebarThreadSummariesEqual(previousSummary, nextSummary)
-        ? state.sidebarThreadsById
-        : {
-            ...state.sidebarThreadsById,
-            [nextThread.id]: nextSummary,
-          };
-      const nextThreadIdsByProjectId =
-        existing !== undefined && existing.projectId !== nextThread.projectId
-          ? removeThreadIdByProjectId(state.threadIdsByProjectId, existing.projectId, existing.id)
-          : state.threadIdsByProjectId;
-      const threadIdsByProjectId = appendThreadIdByProjectId(
-        nextThreadIdsByProjectId,
-        nextThread.projectId,
-        nextThread.id,
-      );
-      return {
-        ...state,
-        threads,
-        sidebarThreadsById,
-        threadIdsByProjectId,
-      };
-    }
-
-    case "thread.deleted": {
-      const threads = state.threads.filter((thread) => thread.id !== event.payload.threadId);
-      if (threads.length === state.threads.length) {
-        return state;
-      }
-      const deletedThread = state.threads.find((thread) => thread.id === event.payload.threadId);
-      const sidebarThreadsById = { ...state.sidebarThreadsById };
-      delete sidebarThreadsById[event.payload.threadId];
-      const threadIdsByProjectId = deletedThread
-        ? removeThreadIdByProjectId(
-            state.threadIdsByProjectId,
-            deletedThread.projectId,
-            deletedThread.id,
-          )
-        : state.threadIdsByProjectId;
-      return {
-        ...state,
-        threads,
-        sidebarThreadsById,
-        threadIdsByProjectId,
-      };
-    }
-
-    case "thread.archived": {
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        archivedAt: event.payload.archivedAt,
-        updatedAt: event.payload.updatedAt,
-      }));
-    }
-
-    case "thread.unarchived": {
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        archivedAt: null,
-        updatedAt: event.payload.updatedAt,
-      }));
-    }
-
-    case "thread.meta-updated": {
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
-        ...(event.payload.modelSelection !== undefined
-          ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }
-          : {}),
-        ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
-        ...(event.payload.worktreePath !== undefined
-          ? { worktreePath: event.payload.worktreePath }
-          : {}),
-        updatedAt: event.payload.updatedAt,
-      }));
-    }
-
-    case "thread.runtime-mode-set": {
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        runtimeMode: event.payload.runtimeMode,
-        updatedAt: event.payload.updatedAt,
-      }));
-    }
-
-    case "thread.interaction-mode-set": {
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        interactionMode: event.payload.interactionMode,
-        updatedAt: event.payload.updatedAt,
-      }));
-    }
-
-    case "thread.turn-start-requested": {
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        ...(event.payload.modelSelection !== undefined
-          ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }
-          : {}),
-        runtimeMode: event.payload.runtimeMode,
-        interactionMode: event.payload.interactionMode,
-        pendingSourceProposedPlan: event.payload.sourceProposedPlan,
-        updatedAt: event.occurredAt,
-      }));
-    }
-
-    case "thread.turn-interrupt-requested": {
-      if (event.payload.turnId === undefined) {
-        return state;
-      }
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const latestTurn = thread.latestTurn;
-        if (latestTurn === null || latestTurn.turnId !== event.payload.turnId) {
-          return thread;
-        }
-        return {
-          ...thread,
-          latestTurn: buildLatestTurn({
-            previous: latestTurn,
-            turnId: event.payload.turnId,
-            state: "interrupted",
-            requestedAt: latestTurn.requestedAt,
-            startedAt: latestTurn.startedAt ?? event.payload.createdAt,
-            completedAt: latestTurn.completedAt ?? event.payload.createdAt,
-            assistantMessageId: latestTurn.assistantMessageId,
-          }),
-          hasLocallyActiveLatestTurn: true,
-          updatedAt: event.occurredAt,
-        };
-      });
-    }
-
-    case "thread.message-sent": {
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const message = mapMessage({
-          id: event.payload.messageId,
-          role: event.payload.role,
-          text: event.payload.text,
-          ...(event.payload.attachments !== undefined
-            ? { attachments: event.payload.attachments }
-            : {}),
-          turnId: event.payload.turnId,
-          streaming: event.payload.streaming,
+  const nextState = (() => {
+    switch (event.type) {
+      case "project.created": {
+        const existingIndex = state.projects.findIndex(
+          (project) =>
+            project.id === event.payload.projectId || project.cwd === event.payload.workspaceRoot,
+        );
+        const nextProject = mapProject({
+          id: event.payload.projectId,
+          title: event.payload.title,
+          workspaceRoot: event.payload.workspaceRoot,
+          defaultModelSelection: event.payload.defaultModelSelection,
+          scripts: event.payload.scripts,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
+          deletedAt: null,
         });
-        const existingMessage = thread.messages.find((entry) => entry.id === message.id);
-        const messages = existingMessage
-          ? thread.messages.map((entry) =>
-              entry.id !== message.id
-                ? entry
-                : {
-                    ...entry,
-                    text: message.streaming
-                      ? `${entry.text}${message.text}`
-                      : message.text.length > 0
-                        ? message.text
-                        : entry.text,
-                    streaming: message.streaming,
-                    ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
-                    ...(message.streaming
-                      ? entry.completedAt !== undefined
-                        ? { completedAt: entry.completedAt }
-                        : {}
-                      : message.completedAt !== undefined
-                        ? { completedAt: message.completedAt }
-                        : {}),
-                    ...(message.attachments !== undefined
-                      ? { attachments: message.attachments }
-                      : {}),
-                  },
-            )
-          : [...thread.messages, message];
-        const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
-        const turnDiffSummaries =
-          event.payload.role === "assistant" && event.payload.turnId !== null
-            ? rebindTurnDiffSummariesForAssistantMessage(
-                thread.turnDiffSummaries,
-                event.payload.turnId,
-                event.payload.messageId,
+        const projects =
+          existingIndex >= 0
+            ? state.projects.map((project, index) =>
+                index === existingIndex ? nextProject : project,
               )
-            : thread.turnDiffSummaries;
-        const latestTurn: Thread["latestTurn"] =
-          event.payload.role === "assistant" &&
-          event.payload.turnId !== null &&
-          (thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId)
-            ? buildLatestTurn({
-                previous: thread.latestTurn,
-                turnId: event.payload.turnId,
-                state: event.payload.streaming
-                  ? "running"
-                  : thread.latestTurn?.state === "interrupted"
-                    ? "interrupted"
-                    : thread.latestTurn?.state === "error"
-                      ? "error"
-                      : "completed",
-                requestedAt:
-                  thread.latestTurn?.turnId === event.payload.turnId
-                    ? thread.latestTurn.requestedAt
-                    : event.payload.createdAt,
-                startedAt:
-                  thread.latestTurn?.turnId === event.payload.turnId
-                    ? (thread.latestTurn.startedAt ?? event.payload.createdAt)
-                    : event.payload.createdAt,
-                sourceProposedPlan: thread.pendingSourceProposedPlan,
-                completedAt: event.payload.streaming
-                  ? thread.latestTurn?.turnId === event.payload.turnId
-                    ? (thread.latestTurn.completedAt ?? null)
-                    : null
-                  : event.payload.updatedAt,
-                assistantMessageId: event.payload.messageId,
-              })
-            : thread.latestTurn;
-        return {
-          ...thread,
-          messages: cappedMessages,
-          turnDiffSummaries,
-          latestTurn,
-          latestUserMessageAt:
-            message.role !== "user"
-              ? (thread.latestUserMessageAt ?? null)
-              : thread.latestUserMessageAt == null || message.createdAt > thread.latestUserMessageAt
-                ? message.createdAt
-                : thread.latestUserMessageAt,
-          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
-            latestTurn,
-            session: thread.session,
-            messages: cappedMessages,
-            activities: thread.activities,
-          }),
-          updatedAt: event.occurredAt,
-        };
-      });
-    }
+            : [...state.projects, nextProject];
+        return { ...state, projects };
+      }
 
-    case "thread.session-set": {
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const session = mapSession(event.payload.session);
-        const latestTurn =
-          event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
-            ? buildLatestTurn({
-                previous: thread.latestTurn,
-                turnId: event.payload.session.activeTurnId,
-                state: "running",
-                requestedAt:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? thread.latestTurn.requestedAt
-                    : event.payload.session.updatedAt,
-                startedAt:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? (thread.latestTurn.startedAt ?? event.payload.session.updatedAt)
-                    : event.payload.session.updatedAt,
-                completedAt: null,
-                assistantMessageId:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? thread.latestTurn.assistantMessageId
-                    : null,
-                sourceProposedPlan: thread.pendingSourceProposedPlan,
-              })
-            : thread.latestTurn;
-        return {
-          ...thread,
-          session,
-          error: sanitizeThreadErrorMessage(event.payload.session.lastError),
-          latestTurn,
-          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
-            latestTurn,
-            session,
-            messages: thread.messages,
-            activities: thread.activities,
-          }),
-          updatedAt: event.occurredAt,
-        };
-      });
-    }
+      case "project.meta-updated": {
+        const projects = updateProject(state.projects, event.payload.projectId, (project) => ({
+          ...project,
+          ...(event.payload.title !== undefined ? { name: event.payload.title } : {}),
+          ...(event.payload.workspaceRoot !== undefined
+            ? { cwd: event.payload.workspaceRoot }
+            : {}),
+          ...(event.payload.defaultModelSelection !== undefined
+            ? {
+                defaultModelSelection: event.payload.defaultModelSelection
+                  ? normalizeModelSelection(event.payload.defaultModelSelection)
+                  : null,
+              }
+            : {}),
+          ...(event.payload.scripts !== undefined
+            ? { scripts: mapProjectScripts(event.payload.scripts) }
+            : {}),
+          updatedAt: event.payload.updatedAt,
+        }));
+        return projects === state.projects ? state : { ...state, projects };
+      }
 
-    case "thread.session-stop-requested": {
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        if (thread.session === null) {
-          return thread;
-        }
-        const stoppedSession = {
-          ...thread.session,
-          status: "closed" as const,
-          orchestrationStatus: "stopped" as const,
-          activeTurnId: undefined,
-          updatedAt: event.payload.createdAt,
-        };
-        return {
-          ...thread,
-          session: stoppedSession,
-          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
-            latestTurn: thread.latestTurn,
-            session: stoppedSession,
-            messages: thread.messages,
-            activities: thread.activities,
-          }),
-          updatedAt: event.occurredAt,
-        };
-      });
-    }
+      case "project.deleted": {
+        const projects = state.projects.filter((project) => project.id !== event.payload.projectId);
+        return projects.length === state.projects.length ? state : { ...state, projects };
+      }
 
-    case "thread.proposed-plan-upserted": {
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const proposedPlan = mapProposedPlan(event.payload.proposedPlan);
-        const proposedPlans = [
-          ...thread.proposedPlans.filter((entry) => entry.id !== proposedPlan.id),
-          proposedPlan,
-        ]
-          .toSorted(
-            (left, right) =>
-              left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
-          )
-          .slice(-MAX_THREAD_PROPOSED_PLANS);
-        return {
-          ...thread,
-          proposedPlans,
-          hasActionableProposedPlan: hasActionableProposedPlan(
-            findLatestProposedPlan(proposedPlans, thread.latestTurn?.turnId ?? null),
-          ),
-          updatedAt: event.occurredAt,
-        };
-      });
-    }
-
-    case "thread.turn-diff-completed": {
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const checkpoint = mapTurnDiffSummary({
-          turnId: event.payload.turnId,
-          checkpointTurnCount: event.payload.checkpointTurnCount,
-          checkpointRef: event.payload.checkpointRef,
-          status: event.payload.status,
-          files: event.payload.files,
-          assistantMessageId: event.payload.assistantMessageId,
-          completedAt: event.payload.completedAt,
+      case "thread.created": {
+        const existing = state.threads.find((thread) => thread.id === event.payload.threadId);
+        const nextThread = mapThread({
+          id: event.payload.threadId,
+          projectId: event.payload.projectId,
+          title: event.payload.title,
+          modelSelection: event.payload.modelSelection,
+          runtimeMode: event.payload.runtimeMode,
+          interactionMode: event.payload.interactionMode,
+          autoDeferUntil: event.payload.autoDeferUntil,
+          consecutiveAutoNoops: event.payload.consecutiveAutoNoops,
+          branch: event.payload.branch,
+          worktreePath: event.payload.worktreePath,
+          latestTurn: null,
+          createdAt: event.payload.createdAt,
+          updatedAt: event.payload.updatedAt,
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
         });
-        const existing = thread.turnDiffSummaries.find(
-          (entry) => entry.turnId === checkpoint.turnId,
+        const threads = existing
+          ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
+          : [...state.threads, nextThread];
+        const nextSummary = buildSidebarThreadSummary(nextThread);
+        const previousSummary = state.sidebarThreadsById[nextThread.id];
+        const sidebarThreadsById = sidebarThreadSummariesEqual(previousSummary, nextSummary)
+          ? state.sidebarThreadsById
+          : {
+              ...state.sidebarThreadsById,
+              [nextThread.id]: nextSummary,
+            };
+        const nextThreadIdsByProjectId =
+          existing !== undefined && existing.projectId !== nextThread.projectId
+            ? removeThreadIdByProjectId(state.threadIdsByProjectId, existing.projectId, existing.id)
+            : state.threadIdsByProjectId;
+        const threadIdsByProjectId = appendThreadIdByProjectId(
+          nextThreadIdsByProjectId,
+          nextThread.projectId,
+          nextThread.id,
         );
-        if (existing && existing.status !== "missing" && checkpoint.status === "missing") {
-          return thread;
-        }
-        const turnDiffSummaries = [
-          ...thread.turnDiffSummaries.filter((entry) => entry.turnId !== checkpoint.turnId),
-          checkpoint,
-        ]
-          .toSorted(
-            (left, right) =>
-              (left.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER) -
-              (right.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER),
-          )
-          .slice(-MAX_THREAD_CHECKPOINTS);
-        const latestTurn =
-          thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId
-            ? buildLatestTurn({
-                previous: thread.latestTurn,
-                turnId: event.payload.turnId,
-                state: checkpointStatusToLatestTurnState(event.payload.status),
-                requestedAt: thread.latestTurn?.requestedAt ?? event.payload.completedAt,
-                startedAt: thread.latestTurn?.startedAt ?? event.payload.completedAt,
-                completedAt: event.payload.completedAt,
-                assistantMessageId: event.payload.assistantMessageId,
-                sourceProposedPlan: thread.pendingSourceProposedPlan,
-              })
-            : thread.latestTurn;
         return {
-          ...thread,
-          turnDiffSummaries,
-          latestTurn,
-          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
-            latestTurn,
-            session: thread.session,
-            messages: thread.messages,
-            activities: thread.activities,
-          }),
-          updatedAt: event.occurredAt,
+          ...state,
+          threads,
+          sidebarThreadsById,
+          threadIdsByProjectId,
         };
-      });
-    }
+      }
 
-    case "thread.reverted": {
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const turnDiffSummaries = thread.turnDiffSummaries
-          .filter(
-            (entry) =>
-              entry.checkpointTurnCount !== undefined &&
-              entry.checkpointTurnCount <= event.payload.turnCount,
-          )
-          .toSorted(
-            (left, right) =>
-              (left.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER) -
-              (right.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER),
-          )
-          .slice(-MAX_THREAD_CHECKPOINTS);
-        const retainedTurnIds = new Set(turnDiffSummaries.map((entry) => entry.turnId));
-        const messages = retainThreadMessagesAfterRevert(
-          thread.messages,
-          retainedTurnIds,
-          event.payload.turnCount,
-        ).slice(-MAX_THREAD_MESSAGES);
-        const proposedPlans = retainThreadProposedPlansAfterRevert(
-          thread.proposedPlans,
-          retainedTurnIds,
-        ).slice(-MAX_THREAD_PROPOSED_PLANS);
-        const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds);
-        const latestCheckpoint = turnDiffSummaries.at(-1) ?? null;
-
+      case "thread.deleted": {
+        const threads = state.threads.filter((thread) => thread.id !== event.payload.threadId);
+        if (threads.length === state.threads.length) {
+          return state;
+        }
+        const deletedThread = state.threads.find((thread) => thread.id === event.payload.threadId);
+        const sidebarThreadsById = { ...state.sidebarThreadsById };
+        delete sidebarThreadsById[event.payload.threadId];
+        const threadIdsByProjectId = deletedThread
+          ? removeThreadIdByProjectId(
+              state.threadIdsByProjectId,
+              deletedThread.projectId,
+              deletedThread.id,
+            )
+          : state.threadIdsByProjectId;
         return {
+          ...state,
+          threads,
+          sidebarThreadsById,
+          threadIdsByProjectId,
+        };
+      }
+
+      case "thread.archived": {
+        return updateThreadState(state, event.payload.threadId, (thread) => ({
           ...thread,
-          turnDiffSummaries,
-          messages,
-          proposedPlans,
-          activities,
-          pendingSourceProposedPlan: undefined,
-          latestTurn:
-            latestCheckpoint === null
-              ? null
-              : {
-                  turnId: latestCheckpoint.turnId,
-                  state: checkpointStatusToLatestTurnState(
-                    (latestCheckpoint.status ?? "ready") as "ready" | "missing" | "error",
-                  ),
-                  requestedAt: latestCheckpoint.completedAt,
-                  startedAt: latestCheckpoint.completedAt,
-                  completedAt: latestCheckpoint.completedAt,
-                  assistantMessageId: latestCheckpoint.assistantMessageId ?? null,
-                },
-          ...deriveThreadSummaryState({
+          archivedAt: event.payload.archivedAt,
+          updatedAt: event.payload.updatedAt,
+        }));
+      }
+
+      case "thread.unarchived": {
+        return updateThreadState(state, event.payload.threadId, (thread) => ({
+          ...thread,
+          archivedAt: null,
+          updatedAt: event.payload.updatedAt,
+        }));
+      }
+
+      case "thread.meta-updated": {
+        return updateThreadState(state, event.payload.threadId, (thread) => ({
+          ...thread,
+          ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+          ...(event.payload.modelSelection !== undefined
+            ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }
+            : {}),
+          ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
+          ...(event.payload.worktreePath !== undefined
+            ? { worktreePath: event.payload.worktreePath }
+            : {}),
+          updatedAt: event.payload.updatedAt,
+        }));
+      }
+
+      case "thread.runtime-mode-set": {
+        return updateThreadState(state, event.payload.threadId, (thread) => ({
+          ...thread,
+          runtimeMode: event.payload.runtimeMode,
+          updatedAt: event.payload.updatedAt,
+        }));
+      }
+
+      case "thread.interaction-mode-set": {
+        return updateThreadState(state, event.payload.threadId, (thread) => ({
+          ...thread,
+          interactionMode: event.payload.interactionMode,
+          updatedAt: event.payload.updatedAt,
+        }));
+      }
+
+      case "thread.turn-start-requested": {
+        return updateThreadState(state, event.payload.threadId, (thread) => ({
+          ...thread,
+          ...(event.payload.modelSelection !== undefined
+            ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }
+            : {}),
+          runtimeMode: event.payload.runtimeMode,
+          interactionMode: event.payload.interactionMode,
+          pendingSourceProposedPlan: event.payload.sourceProposedPlan,
+          updatedAt: event.occurredAt,
+        }));
+      }
+
+      case "thread.turn-interrupt-requested": {
+        if (event.payload.turnId === undefined) {
+          return state;
+        }
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          const latestTurn = thread.latestTurn;
+          if (latestTurn === null || latestTurn.turnId !== event.payload.turnId) {
+            return thread;
+          }
+          return {
+            ...thread,
+            latestTurn: buildLatestTurn({
+              previous: latestTurn,
+              turnId: event.payload.turnId,
+              state: "interrupted",
+              requestedAt: latestTurn.requestedAt,
+              startedAt: latestTurn.startedAt ?? event.payload.createdAt,
+              completedAt: latestTurn.completedAt ?? event.payload.createdAt,
+              assistantMessageId: latestTurn.assistantMessageId,
+            }),
+            hasLocallyActiveLatestTurn: true,
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.message-sent": {
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          const message = mapMessage({
+            id: event.payload.messageId,
+            role: event.payload.role,
+            text: event.payload.text,
+            ...(event.payload.attachments !== undefined
+              ? { attachments: event.payload.attachments }
+              : {}),
+            turnId: event.payload.turnId,
+            streaming: event.payload.streaming,
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.updatedAt,
+          });
+          const existingMessage = thread.messages.find((entry) => entry.id === message.id);
+          const messages = existingMessage
+            ? thread.messages.map((entry) =>
+                entry.id !== message.id
+                  ? entry
+                  : {
+                      ...entry,
+                      text: message.streaming
+                        ? `${entry.text}${message.text}`
+                        : message.text.length > 0
+                          ? message.text
+                          : entry.text,
+                      streaming: message.streaming,
+                      ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
+                      ...(message.streaming
+                        ? entry.completedAt !== undefined
+                          ? { completedAt: entry.completedAt }
+                          : {}
+                        : message.completedAt !== undefined
+                          ? { completedAt: message.completedAt }
+                          : {}),
+                      ...(message.attachments !== undefined
+                        ? { attachments: message.attachments }
+                        : {}),
+                    },
+              )
+            : [...thread.messages, message];
+          const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
+          const turnDiffSummaries =
+            event.payload.role === "assistant" && event.payload.turnId !== null
+              ? rebindTurnDiffSummariesForAssistantMessage(
+                  thread.turnDiffSummaries,
+                  event.payload.turnId,
+                  event.payload.messageId,
+                )
+              : thread.turnDiffSummaries;
+          const latestTurn: Thread["latestTurn"] =
+            event.payload.role === "assistant" &&
+            event.payload.turnId !== null &&
+            (thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId)
+              ? buildLatestTurn({
+                  previous: thread.latestTurn,
+                  turnId: event.payload.turnId,
+                  state: event.payload.streaming
+                    ? "running"
+                    : thread.latestTurn?.state === "interrupted"
+                      ? "interrupted"
+                      : thread.latestTurn?.state === "error"
+                        ? "error"
+                        : "completed",
+                  requestedAt:
+                    thread.latestTurn?.turnId === event.payload.turnId
+                      ? thread.latestTurn.requestedAt
+                      : event.payload.createdAt,
+                  startedAt:
+                    thread.latestTurn?.turnId === event.payload.turnId
+                      ? (thread.latestTurn.startedAt ?? event.payload.createdAt)
+                      : event.payload.createdAt,
+                  sourceProposedPlan: thread.pendingSourceProposedPlan,
+                  completedAt: event.payload.streaming
+                    ? thread.latestTurn?.turnId === event.payload.turnId
+                      ? (thread.latestTurn.completedAt ?? null)
+                      : null
+                    : event.payload.updatedAt,
+                  assistantMessageId: event.payload.messageId,
+                })
+              : thread.latestTurn;
+          const session = normalizeSessionAgainstLatestTurn({
+            session: thread.session,
+            latestTurn,
+            messages: cappedMessages,
+          });
+          return {
+            ...thread,
+            session,
+            messages: cappedMessages,
+            turnDiffSummaries,
+            latestTurn,
+            latestUserMessageAt:
+              message.role !== "user"
+                ? (thread.latestUserMessageAt ?? null)
+                : thread.latestUserMessageAt == null ||
+                    message.createdAt > thread.latestUserMessageAt
+                  ? message.createdAt
+                  : thread.latestUserMessageAt,
+            hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+              latestTurn,
+              session,
+              messages: cappedMessages,
+              activities: thread.activities,
+            }),
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.session-set": {
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          const incomingSession = mapSession(event.payload.session);
+          const latestTurn =
+            event.payload.session.status === "running" &&
+            event.payload.session.activeTurnId !== null &&
+            !(
+              thread.latestTurn?.turnId === event.payload.session.activeTurnId &&
+              thread.latestTurn.completedAt !== null
+            )
+              ? buildLatestTurn({
+                  previous: thread.latestTurn,
+                  turnId: event.payload.session.activeTurnId,
+                  state: "running",
+                  requestedAt:
+                    thread.latestTurn?.turnId === event.payload.session.activeTurnId
+                      ? thread.latestTurn.requestedAt
+                      : event.payload.session.updatedAt,
+                  startedAt:
+                    thread.latestTurn?.turnId === event.payload.session.activeTurnId
+                      ? (thread.latestTurn.startedAt ?? event.payload.session.updatedAt)
+                      : event.payload.session.updatedAt,
+                  completedAt: null,
+                  assistantMessageId:
+                    thread.latestTurn?.turnId === event.payload.session.activeTurnId
+                      ? thread.latestTurn.assistantMessageId
+                      : null,
+                  sourceProposedPlan: thread.pendingSourceProposedPlan,
+                })
+              : thread.latestTurn;
+          const session = normalizeSessionAgainstLatestTurn({
+            session: incomingSession,
+            latestTurn,
+            messages: thread.messages,
+          });
+          return {
+            ...thread,
+            session,
+            error: sanitizeThreadErrorMessage(event.payload.session.lastError),
+            latestTurn,
+            hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+              latestTurn,
+              session,
+              messages: thread.messages,
+              activities: thread.activities,
+            }),
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.session-stop-requested": {
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          if (thread.session === null) {
+            return thread;
+          }
+          const stoppedSession = {
+            ...thread.session,
+            status: "closed" as const,
+            orchestrationStatus: "stopped" as const,
+            activeTurnId: undefined,
+            updatedAt: event.payload.createdAt,
+          };
+          return {
+            ...thread,
+            session: stoppedSession,
+            hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+              latestTurn: thread.latestTurn,
+              session: stoppedSession,
+              messages: thread.messages,
+              activities: thread.activities,
+            }),
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.proposed-plan-upserted": {
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          const proposedPlan = mapProposedPlan(event.payload.proposedPlan);
+          const proposedPlans = [
+            ...thread.proposedPlans.filter((entry) => entry.id !== proposedPlan.id),
+            proposedPlan,
+          ]
+            .toSorted(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            )
+            .slice(-MAX_THREAD_PROPOSED_PLANS);
+          return {
+            ...thread,
+            proposedPlans,
+            hasActionableProposedPlan: hasActionableProposedPlan(
+              findLatestProposedPlan(proposedPlans, thread.latestTurn?.turnId ?? null),
+            ),
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.turn-diff-completed": {
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          const checkpoint = mapTurnDiffSummary({
+            turnId: event.payload.turnId,
+            checkpointTurnCount: event.payload.checkpointTurnCount,
+            checkpointRef: event.payload.checkpointRef,
+            status: event.payload.status,
+            files: event.payload.files,
+            assistantMessageId: event.payload.assistantMessageId,
+            completedAt: event.payload.completedAt,
+          });
+          const existing = thread.turnDiffSummaries.find(
+            (entry) => entry.turnId === checkpoint.turnId,
+          );
+          if (existing && existing.status !== "missing" && checkpoint.status === "missing") {
+            return thread;
+          }
+          const turnDiffSummaries = [
+            ...thread.turnDiffSummaries.filter((entry) => entry.turnId !== checkpoint.turnId),
+            checkpoint,
+          ]
+            .toSorted(
+              (left, right) =>
+                (left.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER) -
+                (right.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER),
+            )
+            .slice(-MAX_THREAD_CHECKPOINTS);
+          const latestTurn =
+            thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId
+              ? buildLatestTurn({
+                  previous: thread.latestTurn,
+                  turnId: event.payload.turnId,
+                  state: checkpointStatusToLatestTurnState(event.payload.status),
+                  requestedAt: thread.latestTurn?.requestedAt ?? event.payload.completedAt,
+                  startedAt: thread.latestTurn?.startedAt ?? event.payload.completedAt,
+                  completedAt: event.payload.completedAt,
+                  assistantMessageId: event.payload.assistantMessageId,
+                  sourceProposedPlan: thread.pendingSourceProposedPlan,
+                })
+              : thread.latestTurn;
+          const session = normalizeSessionAgainstLatestTurn({
+            session: thread.session,
+            latestTurn,
+            messages: thread.messages,
+          });
+          return {
+            ...thread,
+            session,
+            turnDiffSummaries,
+            latestTurn,
+            hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+              latestTurn,
+              session,
+              messages: thread.messages,
+              activities: thread.activities,
+            }),
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.reverted": {
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          const turnDiffSummaries = thread.turnDiffSummaries
+            .filter(
+              (entry) =>
+                entry.checkpointTurnCount !== undefined &&
+                entry.checkpointTurnCount <= event.payload.turnCount,
+            )
+            .toSorted(
+              (left, right) =>
+                (left.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER) -
+                (right.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER),
+            )
+            .slice(-MAX_THREAD_CHECKPOINTS);
+          const retainedTurnIds = new Set(turnDiffSummaries.map((entry) => entry.turnId));
+          const messages = retainThreadMessagesAfterRevert(
+            thread.messages,
+            retainedTurnIds,
+            event.payload.turnCount,
+          ).slice(-MAX_THREAD_MESSAGES);
+          const proposedPlans = retainThreadProposedPlansAfterRevert(
+            thread.proposedPlans,
+            retainedTurnIds,
+          ).slice(-MAX_THREAD_PROPOSED_PLANS);
+          const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds);
+          const latestCheckpoint = turnDiffSummaries.at(-1) ?? null;
+
+          return {
+            ...thread,
+            turnDiffSummaries,
+            messages,
+            proposedPlans,
+            activities,
+            pendingSourceProposedPlan: undefined,
             latestTurn:
               latestCheckpoint === null
                 ? null
@@ -1311,46 +1577,67 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
                     completedAt: latestCheckpoint.completedAt,
                     assistantMessageId: latestCheckpoint.assistantMessageId ?? null,
                   },
-            session: thread.session,
-            messages,
+            ...deriveThreadSummaryState({
+              latestTurn:
+                latestCheckpoint === null
+                  ? null
+                  : {
+                      turnId: latestCheckpoint.turnId,
+                      state: checkpointStatusToLatestTurnState(
+                        (latestCheckpoint.status ?? "ready") as "ready" | "missing" | "error",
+                      ),
+                      requestedAt: latestCheckpoint.completedAt,
+                      startedAt: latestCheckpoint.completedAt,
+                      completedAt: latestCheckpoint.completedAt,
+                      assistantMessageId: latestCheckpoint.assistantMessageId ?? null,
+                    },
+              session: thread.session,
+              messages,
+              activities,
+              proposedPlans,
+            }),
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.activity-appended": {
+        return updateThreadState(state, event.payload.threadId, (thread) => {
+          const activities = [
+            ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
+            { ...event.payload.activity },
+          ]
+            .toSorted(compareActivities)
+            .slice(-MAX_THREAD_ACTIVITIES);
+          return {
+            ...thread,
             activities,
-            proposedPlans,
-          }),
-          updatedAt: event.occurredAt,
-        };
-      });
+            hasPendingApprovals: derivePendingApprovals(activities).length > 0,
+            hasPendingUserInput: derivePendingUserInputs(activities).length > 0,
+            hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
+              latestTurn: thread.latestTurn,
+              session: thread.session,
+              messages: thread.messages,
+              activities,
+            }),
+            updatedAt: event.occurredAt,
+          };
+        });
+      }
+
+      case "thread.approval-response-requested":
+      case "thread.user-input-response-requested":
+        return state;
     }
 
-    case "thread.activity-appended": {
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const activities = [
-          ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
-          { ...event.payload.activity },
-        ]
-          .toSorted(compareActivities)
-          .slice(-MAX_THREAD_ACTIVITIES);
-        return {
-          ...thread,
-          activities,
-          hasPendingApprovals: derivePendingApprovals(activities).length > 0,
-          hasPendingUserInput: derivePendingUserInputs(activities).length > 0,
-          hasLocallyActiveLatestTurn: hasLocallyActiveLatestTurn({
-            latestTurn: thread.latestTurn,
-            session: thread.session,
-            messages: thread.messages,
-            activities,
-          }),
-          updatedAt: event.occurredAt,
-        };
-      });
-    }
+    return state;
+  })();
 
-    case "thread.approval-response-requested":
-    case "thread.user-input-response-requested":
-      return state;
+  if (nextState === state) {
+    return state;
   }
 
-  return state;
+  return nextState;
 }
 
 export function applyOrchestrationEvents(

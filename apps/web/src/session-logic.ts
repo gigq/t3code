@@ -198,8 +198,9 @@ export function deriveActiveWorkStartedAt(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
   sendStartedAt: string | null,
+  latestTurnStillActive = false,
 ): string | null {
-  if (!isLatestTurnSettled(latestTurn, session)) {
+  if (latestTurnStillActive || !isLatestTurnSettled(latestTurn, session)) {
     return latestTurn?.startedAt ?? sendStartedAt;
   }
   return sendStartedAt;

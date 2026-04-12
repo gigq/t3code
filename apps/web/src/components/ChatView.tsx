@@ -163,6 +163,7 @@ import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./Compose
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ConnectionStatusIndicator } from "./ConnectionStatusIndicator";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
@@ -1264,6 +1265,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeLatestTurn,
     activeThread?.session ?? null,
     localDispatchStartedAt,
+    hasVisibleTurnActivity,
   );
   const isComposerApprovalState = activePendingApproval !== null;
   const hasComposerHeader =
@@ -2768,14 +2770,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThreadId, storeClearTerminalLaunchContext, terminalState.terminalOpen]);
 
   useEffect(() => {
-    if (phase !== "running") return;
+    if (!isWorking) return;
+    setNowTick(Date.now());
     const timer = window.setInterval(() => {
       setNowTick(Date.now());
     }, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [phase]);
+  }, [isWorking]);
 
   const resetSendPhase = useCallback(() => {
     setSendPhase("idle");
@@ -4644,6 +4647,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         }
                         className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                       >
+                        <ConnectionStatusIndicator />
                         {activeContextWindow ? (
                           <ContextWindowMeter usage={activeContextWindow} />
                         ) : null}

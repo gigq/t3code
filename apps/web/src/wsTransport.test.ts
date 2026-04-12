@@ -601,6 +601,105 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("rebinds active subscriptions onto the new session during reconnect", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const listener = vi.fn();
+    const onResubscribe = vi.fn();
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+      { onResubscribe },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = sockets[0];
+    if (!firstSocket) {
+      throw new Error("Expected first websocket instance");
+    }
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(firstSocket.sent).toHaveLength(1);
+    });
+
+    const firstRequest = JSON.parse(firstSocket.sent[0] ?? "{}") as { id: string };
+    firstSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: firstRequest.id,
+        values: [
+          {
+            version: 1,
+            sequence: 1,
+            type: "welcome",
+            payload: {
+              cwd: "/tmp/one",
+              projectName: "one",
+              serverInstanceId: "server-1",
+            },
+          },
+        ],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    await transport.reconnect();
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    const secondSocket = sockets[1];
+    if (!secondSocket) {
+      throw new Error("Expected second websocket instance");
+    }
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+
+    const secondRequest = JSON.parse(secondSocket.sent[0] ?? "{}") as {
+      id: string;
+      tag: string;
+    };
+    expect(secondRequest.tag).toBe(WS_METHODS.subscribeServerLifecycle);
+    expect(secondRequest.id).not.toBe(firstRequest.id);
+    expect(onResubscribe).toHaveBeenCalledOnce();
+
+    const secondEvent = {
+      version: 1,
+      sequence: 2,
+      type: "welcome",
+      payload: {
+        cwd: "/tmp/two",
+        projectName: "two",
+        serverInstanceId: "server-2",
+      },
+    };
+    secondSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: secondRequest.id,
+        values: [secondEvent],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(listener).toHaveBeenLastCalledWith(secondEvent);
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("streams finite request events without re-subscribing", async () => {
     const transport = new WsTransport("ws://localhost:3020");
     const listener = vi.fn();

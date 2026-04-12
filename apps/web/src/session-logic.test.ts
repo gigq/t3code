@@ -1312,6 +1312,20 @@ describe("deriveActiveWorkStartedAt", () => {
       ),
     ).toBe("2026-02-27T21:11:00.000Z");
   });
+
+  it("keeps using the latest turn start while stale post-completion activity is still arriving", () => {
+    expect(
+      deriveActiveWorkStartedAt(
+        latestTurn,
+        {
+          orchestrationStatus: "ready",
+          activeTurnId: undefined,
+        },
+        "2026-02-27T21:11:00.000Z",
+        true,
+      ),
+    ).toBe("2026-02-27T21:10:00.000Z");
+  });
 });
 
 describe("hasLocallyActiveLatestTurn", () => {
