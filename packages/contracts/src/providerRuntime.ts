@@ -26,6 +26,7 @@ const RuntimeEventRawSource = Schema.Literals([
   "codex.sdk.thread-event",
   "copilot.acp.notification",
   "copilot.acp.request",
+  "opencode.sdk.event",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
 

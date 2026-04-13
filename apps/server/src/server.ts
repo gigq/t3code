@@ -20,6 +20,7 @@ import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/Provi
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
 import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter";
 import { CopilotAdapterLive } from "./provider/Layers/CopilotAdapter";
+import { makeOpenCodeAdapterLive } from "./provider/Layers/OpenCodeAdapter";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
 import { ProviderReplayTranscriptLive } from "./provider/Layers/ProviderReplayTranscript";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
@@ -169,10 +170,12 @@ const ProviderLayerLive = Layer.unwrap(
       Layer.provide(ProviderReplayTranscriptLive),
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     );
+    const openCodeAdapterLayer = makeOpenCodeAdapterLive();
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),
       Layer.provide(copilotAdapterLayer),
+      Layer.provide(openCodeAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
     return makeProviderServiceLive(

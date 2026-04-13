@@ -53,6 +53,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-copilot-model-slug",
     example: "gpt-4.1",
   },
+  opencode: {
+    provider: "opencode",
+    title: "OpenCode",
+    description: "Save additional OpenCode model slugs in `provider/model` format.",
+    placeholder: "openai/gpt-5",
+    example: "anthropic/claude-sonnet-4-5-20250929",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
@@ -179,6 +186,12 @@ export function getCustomModelOptionsByProvider(
       "copilot",
       selectedProvider === "copilot" ? selectedModel : undefined,
     ),
+    opencode: getAppModelOptions(
+      settings,
+      providers,
+      "opencode",
+      selectedProvider === "opencode" ? selectedModel : undefined,
+    ),
   };
 }
 
@@ -218,9 +231,24 @@ export function resolveAppModelSelectionState(
     },
   });
 
+  if (resolvedProvider === "codex") {
+    const options = modelOptionsForDispatch as Extract<
+      TextGenerationModelSelection,
+      { provider: "codex" }
+    >["options"];
+    return {
+      provider: resolvedProvider,
+      model,
+      ...(options ? { options } : {}),
+    };
+  }
+  const options = modelOptionsForDispatch as Extract<
+    TextGenerationModelSelection,
+    { provider: "claudeAgent" }
+  >["options"];
   return {
     provider: resolvedProvider,
     model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
+    ...(options ? { options } : {}),
   };
 }

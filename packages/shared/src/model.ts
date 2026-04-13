@@ -7,7 +7,9 @@ import {
   type CodexModelOptions,
   type ModelCapabilities,
   type ModelSelection,
+  type OpenCodeModelOptions,
   type ProviderKind,
+  type ProviderModelOptions,
 } from "@t3tools/contracts";
 
 export interface SelectableModelOption {
@@ -15,28 +17,14 @@ export interface SelectableModelOption {
   name: string;
 }
 
-// ── Effort helpers ────────────────────────────────────────────────────
-
-/** Check whether a capabilities object includes a given effort value. */
 export function hasEffortLevel(caps: ModelCapabilities, value: string): boolean {
   return caps.reasoningEffortLevels.some((l) => l.value === value);
 }
 
-/** Return the default effort value for a capabilities object, or null if none. */
 export function getDefaultEffort(caps: ModelCapabilities): string | null {
   return caps.reasoningEffortLevels.find((l) => l.isDefault)?.value ?? null;
 }
 
-/**
- * Resolve a raw effort option against capabilities.
- *
- * Returns the effective effort value — the explicit value if supported and not
- * prompt-injected, otherwise the model's default. Returns `undefined` only
- * when the model has no effort levels at all.
- *
- * Prompt-injected efforts (e.g. "ultrathink") are excluded because they are
- * applied via prompt text, not the effort API parameter.
- */
 export function resolveEffort(
   caps: ModelCapabilities,
   raw: string | null | undefined,
@@ -53,30 +41,14 @@ export function resolveEffort(
   return defaultValue ?? undefined;
 }
 
-// ── Context window helpers ───────────────────────────────────────────
-
-/** Check whether a capabilities object includes a given context window value. */
 export function hasContextWindowOption(caps: ModelCapabilities, value: string): boolean {
   return caps.contextWindowOptions.some((o) => o.value === value);
 }
 
-/** Return the default context window value, or `null` if none is defined. */
 export function getDefaultContextWindow(caps: ModelCapabilities): string | null {
   return caps.contextWindowOptions.find((o) => o.isDefault)?.value ?? null;
 }
 
-/**
- * Resolve a raw `contextWindow` option against capabilities.
- *
- * Returns the effective context window value — the explicit value if supported,
- * otherwise the model's default. Returns `undefined` only when the model has
- * no context window options at all.
- *
- * Unlike effort levels (where the API has matching defaults), the context
- * window requires an explicit API suffix (e.g. `[1m]`), so we always preserve
- * the resolved value to avoid ambiguity between "user chose the default" and
- * "not specified".
- */
 export function resolveContextWindow(
   caps: ModelCapabilities,
   raw: string | null | undefined,
@@ -125,6 +97,55 @@ export function normalizeCopilotModelOptionsWithCapabilities(
   return undefined;
 }
 
+function resolveLabeledOption(
+  options: ReadonlyArray<{ value: string; isDefault?: boolean | undefined }> | undefined,
+  raw: string | null | undefined,
+): string | undefined {
+  if (!options || options.length === 0) {
+    return raw ?? undefined;
+  }
+  if (raw && options.some((option) => option.value === raw)) {
+    return raw;
+  }
+  return options.find((option) => option.isDefault)?.value;
+}
+
+export function normalizeOpenCodeModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: OpenCodeModelOptions | null | undefined,
+): OpenCodeModelOptions | undefined {
+  const variant = resolveLabeledOption(caps.variantOptions, trimOrNull(modelOptions?.variant));
+  const agent = resolveLabeledOption(caps.agentOptions, trimOrNull(modelOptions?.agent));
+  const nextOptions: OpenCodeModelOptions = {
+    ...(variant ? { variant } : {}),
+    ...(agent ? { agent } : {}),
+  };
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeProviderModelOptionsWithCapabilities(
+  provider: ProviderKind,
+  caps: ModelCapabilities,
+  modelOptions: ProviderModelOptions[ProviderKind] | null | undefined,
+): ProviderModelOptions[ProviderKind] | undefined {
+  switch (provider) {
+    case "codex":
+      return normalizeCodexModelOptionsWithCapabilities(caps, modelOptions as CodexModelOptions);
+    case "claudeAgent":
+      return normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions as ClaudeModelOptions);
+    case "copilot":
+      return normalizeCopilotModelOptionsWithCapabilities(
+        caps,
+        modelOptions as CopilotModelOptions,
+      );
+    case "opencode":
+      return normalizeOpenCodeModelOptionsWithCapabilities(
+        caps,
+        modelOptions as OpenCodeModelOptions,
+      );
+  }
+}
+
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
@@ -136,12 +157,10 @@ export function normalizeModelSlug(
   if (typeof model !== "string") {
     return null;
   }
-
   const trimmed = model.trim();
   if (!trimmed) {
     return null;
   }
-
   const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
   const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
     ? aliases[trimmed]
@@ -157,27 +176,22 @@ export function resolveSelectableModel(
   if (typeof value !== "string") {
     return null;
   }
-
   const trimmed = value.trim();
   if (!trimmed) {
     return null;
   }
-
   const direct = options.find((option) => option.slug === trimmed);
   if (direct) {
     return direct.slug;
   }
-
   const byName = options.find((option) => option.name.toLowerCase() === trimmed.toLowerCase());
   if (byName) {
     return byName.slug;
   }
-
   const normalized = normalizeModelSlug(trimmed, provider);
   if (!normalized) {
     return null;
   }
-
   const resolved = options.find((option) => option.slug === normalized);
   return resolved ? resolved.slug : null;
 }
@@ -197,24 +211,45 @@ export function resolveModelSlugForProvider(
   return resolveModelSlug(model, provider);
 }
 
-/** Trim a string, returning null for empty/missing values. */
 export function trimOrNull<T extends string>(value: T | null | undefined): T | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim() as T;
   return trimmed || null;
 }
 
-/**
- * Resolve the actual API model identifier from a model selection.
- *
- * Provider-aware: each provider can map `contextWindow` (or other options)
- * to whatever the API requires — a model-id suffix, a separate parameter, etc.
- * The canonical slug stored in the selection stays unchanged so the
- * capabilities system keeps working.
- *
- * Expects `contextWindow` to already be resolved (via `resolveContextWindow`)
- * to the effective value, not stripped to `undefined` for defaults.
- */
+export function createModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ProviderModelOptions[ProviderKind] | undefined,
+): ModelSelection {
+  switch (provider) {
+    case "codex":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as CodexModelOptions } : {}),
+      };
+    case "claudeAgent":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as ClaudeModelOptions } : {}),
+      };
+    case "copilot":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as CopilotModelOptions } : {}),
+      };
+    case "opencode":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as OpenCodeModelOptions } : {}),
+      };
+  }
+}
+
 export function resolveApiModelId(modelSelection: ModelSelection): string {
   switch (modelSelection.provider) {
     case "claudeAgent": {
@@ -229,6 +264,9 @@ export function resolveApiModelId(modelSelection: ModelSelection): string {
       return modelSelection.model === "default"
         ? DEFAULT_MODEL_BY_PROVIDER.copilot
         : modelSelection.model;
+    }
+    case "opencode": {
+      return modelSelection.model;
     }
     default: {
       return modelSelection.model;

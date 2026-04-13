@@ -17,6 +17,7 @@ import {
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
+  type TextGenerationModelSelection,
   ThreadId,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
@@ -119,6 +120,12 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     title: "Copilot",
     binaryPlaceholder: "Copilot binary path",
     binaryDescription: "Path to the Copilot binary",
+  },
+  {
+    provider: "opencode",
+    title: "OpenCode",
+    binaryPlaceholder: "OpenCode binary path",
+    binaryDescription: "Path to the OpenCode binary",
   },
 ] as const;
 
@@ -550,6 +557,11 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.copilot.binaryPath ||
       settings.providers.copilot.customModels.length > 0,
     ),
+    opencode: Boolean(
+      settings.providers.opencode.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.opencode.binaryPath ||
+      settings.providers.opencode.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
@@ -557,6 +569,7 @@ export function GeneralSettingsPanel() {
     codex: "",
     claudeAgent: "",
     copilot: "",
+    opencode: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -1100,14 +1113,18 @@ export function GeneralSettingsPanel() {
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onProviderModelChange={(provider, model) => {
-                  if (provider === "copilot") {
+                  if (provider === "copilot" || provider === "opencode") {
                     return;
                   }
+                  const nextSelection =
+                    provider === "codex"
+                      ? ({ provider, model } as const)
+                      : ({ provider, model } as const);
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: { provider, model },
+                        textGenerationModelSelection: nextSelection,
                       },
                       textGenerationProviders,
                     ),
@@ -1128,15 +1145,43 @@ export function GeneralSettingsPanel() {
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onModelOptionsChange={(nextOptions) => {
+                  const nextSelection =
+                    textGenProvider === "codex"
+                      ? nextOptions
+                        ? ({
+                            provider: textGenProvider,
+                            model: textGenModel,
+                            options: nextOptions as NonNullable<
+                              Extract<
+                                TextGenerationModelSelection,
+                                { provider: "codex" }
+                              >["options"]
+                            >,
+                          } as const)
+                        : ({
+                            provider: textGenProvider,
+                            model: textGenModel,
+                          } as const)
+                      : nextOptions
+                        ? ({
+                            provider: textGenProvider,
+                            model: textGenModel,
+                            options: nextOptions as NonNullable<
+                              Extract<
+                                TextGenerationModelSelection,
+                                { provider: "claudeAgent" }
+                              >["options"]
+                            >,
+                          } as const)
+                        : ({
+                            provider: textGenProvider,
+                            model: textGenModel,
+                          } as const);
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: textGenProvider,
-                          model: textGenModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        textGenerationModelSelection: nextSelection,
                       },
                       textGenerationProviders,
                     ),
@@ -1463,7 +1508,9 @@ export function GeneralSettingsPanel() {
                           placeholder={
                             providerCard.provider === "codex"
                               ? "gpt-6.7-codex-ultra-preview"
-                              : "claude-sonnet-5-0"
+                              : providerCard.provider === "opencode"
+                                ? "openai/gpt-5"
+                                : "claude-sonnet-5-0"
                           }
                           spellCheck={false}
                         />

@@ -25,10 +25,17 @@ export type ClaudeModelOptions = typeof ClaudeModelOptions.Type;
 export const CopilotModelOptions = Schema.Struct({});
 export type CopilotModelOptions = typeof CopilotModelOptions.Type;
 
+export const OpenCodeModelOptions = Schema.Struct({
+  variant: Schema.optional(TrimmedNonEmptyString),
+  agent: Schema.optional(TrimmedNonEmptyString),
+});
+export type OpenCodeModelOptions = typeof OpenCodeModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
   copilot: Schema.optional(CopilotModelOptions),
+  opencode: Schema.optional(OpenCodeModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -52,6 +59,8 @@ export const ModelCapabilities = Schema.Struct({
   supportsThinkingToggle: Schema.Boolean,
   contextWindowOptions: Schema.Array(ContextWindowOption),
   promptInjectedEffortLevels: Schema.Array(TrimmedNonEmptyString),
+  variantOptions: Schema.optional(Schema.Array(EffortOption)),
+  agentOptions: Schema.optional(Schema.Array(EffortOption)),
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
@@ -59,6 +68,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
   copilot: "default",
+  opencode: "openai/gpt-5",
 };
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -72,6 +82,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<
 > = {
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
+  opencode: "openai/gpt-5",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
@@ -97,6 +108,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",
   },
   copilot: {},
+  opencode: {},
 };
 
 // ── Provider display names ────────────────────────────────────────────
@@ -105,4 +117,5 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
   copilot: "Copilot",
+  opencode: "OpenCode",
 };
