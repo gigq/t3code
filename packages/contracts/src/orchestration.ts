@@ -21,6 +21,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getThreadSnapshot: "orchestration.getThreadSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
   importCodexThread: "orchestration.importCodexThread",
+  forkThread: "orchestration.forkThread",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
@@ -1250,6 +1251,28 @@ export class OrchestrationImportCodexThreadError extends Schema.TaggedErrorClass
   },
 ) {}
 
+export const OrchestrationForkThreadInput = Schema.Struct({
+  sourceThreadId: ThreadId,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  title: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationForkThreadInput = typeof OrchestrationForkThreadInput.Type;
+
+export const OrchestrationForkThreadResult = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationForkThreadResult = typeof OrchestrationForkThreadResult.Type;
+
+export class OrchestrationForkThreadError extends Schema.TaggedErrorClass<OrchestrationForkThreadError>()(
+  "OrchestrationForkThreadError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
 export const OrchestrationRpcSchemas = {
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
@@ -1270,6 +1293,10 @@ export const OrchestrationRpcSchemas = {
   importCodexThread: {
     input: OrchestrationImportCodexThreadInput,
     output: OrchestrationImportCodexThreadResult,
+  },
+  forkThread: {
+    input: OrchestrationForkThreadInput,
+    output: OrchestrationForkThreadResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,

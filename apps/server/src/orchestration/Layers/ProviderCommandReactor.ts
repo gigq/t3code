@@ -31,6 +31,11 @@ import { increment, orchestrationEventsProcessedTotal } from "../../observabilit
 import { ProviderAdapterRequestError, ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import {
+  buildForkBootstrapPrompt,
+  selectForkBootstrapMessages,
+  shouldBootstrapForkHistory,
+} from "../forkThread.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { toOrchestrationSession } from "../providerSession.ts";
 import {
@@ -60,6 +65,42 @@ type ProviderIntentEvent = Extract<
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function buildImportedThreadBootstrapInput(input: {
+  readonly thread: OrchestrationThread;
+  readonly messageId: string;
+  readonly messageText: string;
+}): string | undefined {
+  if (!shouldBootstrapForkHistory({ thread: input.thread, beforeMessageId: input.messageId })) {
+    return undefined;
+  }
+
+  const { compaction, history } = selectForkBootstrapMessages({
+    thread: input.thread,
+    beforeMessageId: input.messageId,
+  });
+  if (history.length === 0 && !compaction?.summary) {
+    return undefined;
+  }
+
+  const seededInput = buildForkBootstrapPrompt({
+    compaction,
+    history: history.map((message) =>
+      message.attachments
+        ? {
+            role: message.role,
+            text: message.text,
+            attachments: message.attachments,
+          }
+        : {
+            role: message.role,
+            text: message.text,
+          },
+    ),
+    nextUserMessage: input.messageText,
+  });
+  return seededInput === input.messageText ? undefined : seededInput;
 }
 
 const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
@@ -771,9 +812,18 @@ const make = Effect.gen(function* () {
       }
     }
 
+    const bootstrapInput =
+      message.role === "user"
+        ? buildImportedThreadBootstrapInput({
+            thread,
+            messageId: message.id,
+            messageText: message.text,
+          })
+        : undefined;
+
     yield* sendTurnForThread({
       threadId: event.payload.threadId,
-      messageText: message.text,
+      messageText: bootstrapInput ?? message.text,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }

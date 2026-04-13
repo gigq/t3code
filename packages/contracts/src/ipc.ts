@@ -56,6 +56,8 @@ import type {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationBootstrapReadModel,
+  OrchestrationForkThreadInput,
+  OrchestrationForkThreadResult,
   OrchestrationImportCodexThreadInput,
   OrchestrationImportCodexThreadResult,
   OrchestrationThreadSnapshot,
@@ -216,6 +218,7 @@ export interface NativeApi {
     importCodexThread: (
       input: OrchestrationImportCodexThreadInput,
     ) => Promise<OrchestrationImportCodexThreadResult>;
+    forkThread: (input: OrchestrationForkThreadInput) => Promise<OrchestrationForkThreadResult>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,

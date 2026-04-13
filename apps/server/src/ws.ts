@@ -9,9 +9,11 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type GitActionProgressEvent,
   type GitManagerServiceError,
+  type OrchestrationForkThreadInput,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetBootstrapSnapshotError,
+  OrchestrationForkThreadError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetThreadSnapshotError,
@@ -47,6 +49,13 @@ import {
   buildImportedOrchestrationMessages,
   buildImportedThreadTitle,
 } from "./orchestration/importCodexThread";
+import {
+  buildForkedOrchestrationMessages,
+  buildForkedThreadTitle,
+  findLatestForkCompaction,
+  selectForkBootstrapMessages,
+  selectForkableMessages,
+} from "./orchestration/forkThread";
 import { toOrchestrationSession } from "./orchestration/providerSession";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
@@ -207,6 +216,121 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           (cause) =>
             new OrchestrationImportCodexThreadError({
               message: cause instanceof Error ? cause.message : "Failed to import Codex thread.",
+              cause,
+            }),
+        ),
+      );
+    });
+
+    const forkThread = Effect.fn(function* (input: OrchestrationForkThreadInput) {
+      return yield* Effect.gen(function* () {
+        const snapshot = yield* projectionSnapshotQuery.getThreadSnapshot(input.sourceThreadId);
+        const sourceThread = snapshot.thread;
+        if (!sourceThread || sourceThread.deletedAt !== null) {
+          return yield* Effect.fail(
+            new Error(`Source thread '${input.sourceThreadId}' was not found.`),
+          );
+        }
+
+        const createdAt = new Date().toISOString();
+        const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
+        const sourceForkableMessages = selectForkableMessages(sourceThread);
+        const forkedMessages = buildForkedOrchestrationMessages({
+          threadId,
+          messages: sourceForkableMessages,
+          importedAt: createdAt,
+        });
+        const sourceBootstrap = selectForkBootstrapMessages({
+          thread: sourceThread,
+        });
+        const sourceCompaction = findLatestForkCompaction(sourceThread);
+        const title = input.title?.trim() || buildForkedThreadTitle(sourceThread.title);
+
+        yield* orchestrationEngine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+          threadId,
+          projectId: sourceThread.projectId,
+          title,
+          modelSelection: input.modelSelection,
+          runtimeMode: input.runtimeMode,
+          interactionMode: input.interactionMode,
+          branch: sourceThread.branch,
+          worktreePath: sourceThread.worktreePath,
+          createdAt,
+        });
+
+        const cleanupForkedThread = () =>
+          orchestrationEngine
+            .dispatch({
+              type: "thread.delete",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+            })
+            .pipe(Effect.catch(() => Effect.void));
+
+        return yield* Effect.gen(function* () {
+          yield* Effect.forEach(forkedMessages, (message) =>
+            orchestrationEngine.dispatch({
+              type: "thread.message.import",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+              message: {
+                messageId: message.messageId,
+                role: message.role,
+                text: message.text,
+                ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
+                turnId: message.turnId,
+              },
+              createdAt: message.createdAt,
+            }),
+          );
+
+          if (sourceCompaction) {
+            const firstBootstrapMessageId = sourceBootstrap.history[0]?.id;
+            const firstBootstrapIndex =
+              firstBootstrapMessageId !== undefined
+                ? sourceForkableMessages.findIndex(
+                    (message) => message.id === firstBootstrapMessageId,
+                  )
+                : -1;
+            const importedBootstrapStartMessageId =
+              firstBootstrapIndex >= 0 ? forkedMessages[firstBootstrapIndex]?.messageId : undefined;
+
+            yield* orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+              activity: {
+                id: EventId.makeUnsafe(crypto.randomUUID()),
+                tone: "info",
+                kind: "context-compaction",
+                summary: "Context compacted",
+                payload: {
+                  detail:
+                    sourceCompaction.summary && sourceCompaction.summary !== "Context compacted"
+                      ? sourceCompaction.summary
+                      : `Source thread context was compacted before this fork at ${sourceCompaction.compactedAt}.`,
+                  sourceCompactedAt: sourceCompaction.compactedAt,
+                  sourceThreadId: sourceThread.id,
+                  ...(importedBootstrapStartMessageId !== undefined
+                    ? { forkBootstrapStartMessageId: importedBootstrapStartMessageId }
+                    : {}),
+                },
+                turnId: null,
+                createdAt,
+              },
+              createdAt,
+            });
+          }
+
+          return { threadId };
+        }).pipe(Effect.tapError(() => cleanupForkedThread()));
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationForkThreadError({
+              message: cause instanceof Error ? cause.message : "Failed to fork thread.",
               cause,
             }),
         ),
@@ -1053,6 +1177,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         ),
       [ORCHESTRATION_WS_METHODS.importCodexThread]: (input) =>
         observeRpcEffect(ORCHESTRATION_WS_METHODS.importCodexThread, importCodexThread(input), {
+          "rpc.aggregate": "orchestration",
+        }),
+      [ORCHESTRATION_WS_METHODS.forkThread]: (input) =>
+        observeRpcEffect(ORCHESTRATION_WS_METHODS.forkThread, forkThread(input), {
           "rpc.aggregate": "orchestration",
         }),
     });

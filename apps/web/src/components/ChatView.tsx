@@ -161,6 +161,7 @@ import {
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
+import { ForkThreadDialog } from "./ForkThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ConnectionStatusIndicator } from "./ConnectionStatusIndicator";
@@ -207,6 +208,7 @@ import {
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useServerConfig, useServerKeybindings } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+import { useForkThread } from "../hooks/useForkThread";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -755,6 +757,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
+  const [forkDialogOpen, setForkDialogOpen] = useState(false);
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
     null,
   );
@@ -993,6 +996,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThreadId, existingOpenTerminalThreadIds, terminalState.terminalOpen]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = useProjectById(activeThread?.projectId);
+  const { forkThread } = useForkThread();
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -1010,6 +1014,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const closePullRequestDialog = useCallback(() => {
     setPullRequestDialogState(null);
+  }, []);
+
+  const openForkDialog = useCallback(() => {
+    if (!isServerThread || !activeThread) {
+      return;
+    }
+    setForkDialogOpen(true);
+    setComposerHighlightedItemId(null);
+  }, [activeThread, isServerThread]);
+
+  const closeForkDialog = useCallback(() => {
+    setForkDialogOpen(false);
   }, []);
 
   const openOrReuseProjectDraftThread = useCallback(
@@ -3802,6 +3818,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedModel,
   ]);
 
+  const onForkActiveThread = useCallback(
+    async (input: { readonly modelSelection: ModelSelection; readonly title?: string }) => {
+      if (!activeThread || !isServerThread) {
+        return;
+      }
+      await forkThread({
+        sourceThreadId: activeThread.id,
+        modelSelection: input.modelSelection,
+        runtimeMode,
+        interactionMode: "default",
+        ...(input.title ? { title: input.title } : {}),
+      });
+    },
+    [activeThread, forkThread, isServerThread, runtimeMode],
+  );
+
   const onProviderModelSelect = useCallback(
     (provider: ProviderKind, model: string) => {
       if (!activeThread) return;
@@ -4215,12 +4247,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          canForkThread={isServerThread}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          onForkThread={openForkDialog}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />
@@ -4722,6 +4756,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 }
               }}
               onPrepared={handlePreparedPullRequestThread}
+            />
+          ) : null}
+          {isServerThread && activeThread ? (
+            <ForkThreadDialog
+              open={forkDialogOpen}
+              sourceThreadTitle={activeThread.title}
+              sourceModelSelection={selectedModelSelection}
+              providers={providerStatuses}
+              modelOptionsByProvider={modelOptionsByProvider}
+              settings={settings}
+              onOpenChange={(open) => {
+                if (!open) {
+                  closeForkDialog();
+                }
+              }}
+              onSubmit={onForkActiveThread}
             />
           ) : null}
         </div>
