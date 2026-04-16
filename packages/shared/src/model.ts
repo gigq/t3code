@@ -165,7 +165,20 @@ export function normalizeModelSlug(
   const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
     ? aliases[trimmed]
     : undefined;
-  return typeof aliased === "string" ? aliased : trimmed;
+  const normalized = typeof aliased === "string" ? aliased : trimmed;
+
+  if (provider === "opencode") {
+    const separator = normalized.indexOf("/");
+    if (separator > 0) {
+      const providerId = normalized.slice(0, separator);
+      const modelId = normalized.slice(separator + 1);
+      if (providerId === "copilot") {
+        return `github-copilot/${modelId}`;
+      }
+    }
+  }
+
+  return normalized;
 }
 
 export function resolveSelectableModel(
@@ -253,11 +266,12 @@ export function createModelSelection(
 export function resolveApiModelId(modelSelection: ModelSelection): string {
   switch (modelSelection.provider) {
     case "claudeAgent": {
+      const resolvedModel = resolveModelSlug(modelSelection.model, "claudeAgent");
       switch (modelSelection.options?.contextWindow) {
         case "1m":
-          return `${modelSelection.model}[1m]`;
+          return `${resolvedModel}[1m]`;
         default:
-          return modelSelection.model;
+          return resolvedModel;
       }
     }
     case "copilot": {

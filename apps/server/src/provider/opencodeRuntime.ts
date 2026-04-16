@@ -92,6 +92,21 @@ function isPrimaryAgent(agent: Agent): boolean {
   return !agent.hidden && (agent.mode === "primary" || agent.mode === "all");
 }
 
+function isAnthropicLikeModel(
+  providerID: string,
+  model: ProviderListResponse["all"][number]["models"][string],
+): boolean {
+  if (providerID === "anthropic") {
+    return true;
+  }
+
+  const candidates = [model.id, model.name]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.toLowerCase());
+
+  return candidates.some((value) => value.includes("claude"));
+}
+
 function inferVariantValues(providerID: string): ReadonlyArray<string> {
   if (providerID === "anthropic") {
     return ANTHROPIC_VARIANTS;
@@ -108,11 +123,12 @@ function inferVariantValues(providerID: string): ReadonlyArray<string> {
 function inferDefaultVariant(
   providerID: string,
   variants: ReadonlyArray<string>,
+  model?: ProviderListResponse["all"][number]["models"][string],
 ): string | undefined {
   if (variants.length === 1) {
     return variants[0];
   }
-  if (providerID === "anthropic" || providerID.startsWith("google")) {
+  if ((model && isAnthropicLikeModel(providerID, model)) || providerID.startsWith("google")) {
     return variants.includes("high") ? "high" : undefined;
   }
   if (providerID === "openai" || providerID === "opencode") {
@@ -127,8 +143,12 @@ function buildVariantOptions(
 ) {
   const variantValues = Object.keys(model.variants ?? {});
   const resolvedValues =
-    variantValues.length > 0 ? variantValues : [...inferVariantValues(providerID)];
-  const defaultVariant = inferDefaultVariant(providerID, resolvedValues);
+    variantValues.length > 0
+      ? variantValues
+      : isAnthropicLikeModel(providerID, model)
+        ? [...ANTHROPIC_VARIANTS]
+        : [...inferVariantValues(providerID)];
+  const defaultVariant = inferDefaultVariant(providerID, resolvedValues, model);
 
   return resolvedValues.map((value) => {
     const option: { value: string; label: string; isDefault?: boolean } = {

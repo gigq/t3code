@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import type {
   ClaudeSettings,
   ModelCapabilities,
@@ -38,14 +41,15 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = {
 const PROVIDER = "claudeAgent" as const;
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
+    slug: "claude-opus-4-7",
+    name: "Claude Opus 4.7",
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
         { value: "low", label: "Low" },
         { value: "medium", label: "Medium" },
         { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High" },
         { value: "max", label: "Max" },
         { value: "ultrathink", label: "Ultrathink" },
       ],
@@ -323,6 +327,7 @@ function normalizeClaudeAuthMethod(authMethod: string | undefined): string | und
   const normalized = authMethod?.toLowerCase().replace(/[\s_-]+/g, "");
   if (!normalized) return undefined;
   if (normalized === "apikey") return "apiKey";
+  if (normalized === "oauthtoken") return "oauthToken";
   return undefined;
 }
 
@@ -330,10 +335,19 @@ function claudeAuthMetadata(input: {
   readonly subscriptionType: string | undefined;
   readonly authMethod: string | undefined;
 }): { readonly type: string; readonly label: string } | undefined {
-  if (normalizeClaudeAuthMethod(input.authMethod) === "apiKey") {
+  const normalizedAuthMethod = normalizeClaudeAuthMethod(input.authMethod);
+
+  if (normalizedAuthMethod === "apiKey") {
     return {
       type: "apiKey",
       label: "Claude API Key",
+    };
+  }
+
+  if (normalizedAuthMethod === "oauthToken") {
+    return {
+      type: "oauthToken",
+      label: "Claude OAuth Token",
     };
   }
 
@@ -386,6 +400,65 @@ export function adjustModelsForSubscription(
 // ── SDK capability probe ────────────────────────────────────────────
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
+const CLAUDE_OAUTH_EXPIRY_SKEW_MS = 60_000;
+
+export interface ClaudeOauthCredentialExpiry {
+  readonly expiresAtMs: number;
+  readonly expiresAtIso: string;
+}
+
+export function parseClaudeOauthCredentialExpiry(
+  rawCredentialsJson: string,
+): ClaudeOauthCredentialExpiry | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawCredentialsJson);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  const root = parsed as Record<string, unknown>;
+  const oauth = root.claudeAiOauth;
+  if (!oauth || typeof oauth !== "object") {
+    return null;
+  }
+
+  const expiresAt = (oauth as Record<string, unknown>).expiresAt;
+  if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
+    return null;
+  }
+
+  return {
+    expiresAtMs: expiresAt,
+    expiresAtIso: new Date(expiresAt).toISOString(),
+  };
+}
+
+export function isClaudeOauthCredentialExpired(
+  expiry: ClaudeOauthCredentialExpiry | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  return Boolean(expiry && expiry.expiresAtMs <= nowMs + CLAUDE_OAUTH_EXPIRY_SKEW_MS);
+}
+
+async function readClaudeOauthCredentialExpiry(): Promise<ClaudeOauthCredentialExpiry | null> {
+  const home = process.env.HOME;
+  if (!home) {
+    return null;
+  }
+
+  try {
+    return parseClaudeOauthCredentialExpiry(
+      await readFile(join(home, ".claude", ".credentials.json"), "utf8"),
+    );
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Probe account information by spawning a lightweight Claude Agent SDK
@@ -605,6 +678,36 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   const parsed = parseClaudeAuthStatusFromOutput(authProbe.success.value);
   const authMetadata = claudeAuthMetadata({ subscriptionType, authMethod });
+  const normalizedAuthMethod = normalizeClaudeAuthMethod(authMethod);
+  const oauthExpiryResult =
+    normalizedAuthMethod === "apiKey" ||
+    normalizedAuthMethod === "oauthToken" ||
+    Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)
+      ? Result.succeed(null)
+      : yield* Effect.tryPromise(() => readClaudeOauthCredentialExpiry()).pipe(Effect.result);
+  const oauthExpiry = Result.isSuccess(oauthExpiryResult) ? oauthExpiryResult.success : null;
+
+  if (parsed.auth.status === "authenticated" && isClaudeOauthCredentialExpired(oauthExpiry)) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models: resolvedModels,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: {
+          status: "unauthenticated",
+          ...(authMetadata ? authMetadata : {}),
+        },
+        message: oauthExpiry
+          ? `Claude OAuth credentials expired at ${oauthExpiry.expiresAtIso}. Run \`claude auth login\` or \`claude setup-token\` in the service user's shell, then rebounce T3 Code.`
+          : "Claude OAuth credentials appear to be expired. Run `claude auth login` or `claude setup-token` in the service user's shell, then rebounce T3 Code.",
+      },
+    });
+  }
+
   return buildServerProvider({
     provider: PROVIDER,
     enabled: claudeSettings.enabled,

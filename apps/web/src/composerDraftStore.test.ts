@@ -1,6 +1,8 @@
 import * as Schema from "effect/Schema";
 import {
+  DEFAULT_SERVER_SETTINGS,
   ProjectId,
+  type ServerProvider,
   ThreadId,
   type ModelSelection,
   type ProviderModelOptions,
@@ -11,6 +13,7 @@ import {
   COMPOSER_DRAFT_STORAGE_KEY,
   clearPromotedDraftThread,
   clearPromotedDraftThreads,
+  deriveEffectiveComposerModelState,
   type ComposerImageAttachment,
   useComposerDraftStore,
 } from "./composerDraftStore";
@@ -21,6 +24,7 @@ import {
   type TerminalContextDraft,
 } from "./lib/terminalContext";
 import { createDebouncedStorage } from "./lib/storage";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 function makeImage(input: {
   id: string;
@@ -94,6 +98,61 @@ function modelSelection(
 function providerModelOptions(options: ProviderModelOptions): ProviderModelOptions {
   return options;
 }
+
+const COMPOSER_MODEL_TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
+  {
+    provider: "opencode",
+    enabled: true,
+    installed: true,
+    version: "0.1.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    models: [
+      {
+        slug: "github-copilot/claude-opus-4.6",
+        name: "GitHub Copilot · Claude Opus 4.6",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [],
+          supportsFastMode: false,
+          supportsThinkingToggle: false,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+          variantOptions: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+          ],
+          agentOptions: [{ value: "build", label: "Build", isDefault: true }],
+        },
+      },
+    ],
+  },
+];
+
+const COMPOSER_MODEL_TEST_SETTINGS = {
+  ...DEFAULT_SERVER_SETTINGS,
+  ...DEFAULT_CLIENT_SETTINGS,
+};
+
+describe("deriveEffectiveComposerModelState", () => {
+  it("resolves legacy OpenCode thread model slugs against the live provider inventory", () => {
+    const state = deriveEffectiveComposerModelState({
+      draft: null,
+      providers: COMPOSER_MODEL_TEST_PROVIDERS,
+      selectedProvider: "opencode",
+      threadModelSelection: {
+        provider: "opencode",
+        model: "copilot/claude-opus-4.6",
+      },
+      projectModelSelection: null,
+      settings: COMPOSER_MODEL_TEST_SETTINGS,
+    });
+
+    expect(state.selectedModel).toBe("github-copilot/claude-opus-4.6");
+  });
+});
 
 describe("composerDraftStore addImages", () => {
   const threadId = ThreadId.makeUnsafe("thread-dedupe");

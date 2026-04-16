@@ -35,6 +35,7 @@ const claudeCaps: ModelCapabilities = {
   reasoningEffortLevels: [
     { value: "medium", label: "Medium" },
     { value: "high", label: "High", isDefault: true },
+    { value: "xhigh", label: "Extra High" },
     { value: "ultrathink", label: "Ultrathink" },
   ],
   supportsFastMode: false,
@@ -50,6 +51,10 @@ describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
+    expect(normalizeModelSlug("claude-opus-4-6", "claudeAgent")).toBe("claude-opus-4-7");
+    expect(normalizeModelSlug("copilot/claude-opus-4.6", "opencode")).toBe(
+      "github-copilot/claude-opus-4.6",
+    );
   });
 
   it("returns null for empty or missing values", () => {
@@ -103,6 +108,7 @@ describe("resolveEffort", () => {
     expect(resolveEffort(codexCaps, "xhigh")).toBe("xhigh");
     expect(resolveEffort(codexCaps, "high")).toBe("high");
     expect(resolveEffort(claudeCaps, "medium")).toBe("medium");
+    expect(resolveEffort(claudeCaps, "xhigh")).toBe("xhigh");
   });
 
   it("falls back to default when value is unsupported", () => {
@@ -202,7 +208,7 @@ describe("resolveApiModelId", () => {
         model: "claude-opus-4-6",
         options: { contextWindow: "1m" },
       }),
-    ).toBe("claude-opus-4-6[1m]");
+    ).toBe("claude-opus-4-7[1m]");
   });
 
   it("returns the model as-is for 200k context window", () => {
@@ -212,16 +218,16 @@ describe("resolveApiModelId", () => {
         model: "claude-opus-4-6",
         options: { contextWindow: "200k" },
       }),
-    ).toBe("claude-opus-4-6");
+    ).toBe("claude-opus-4-7");
   });
 
   it("returns the model as-is when no context window is set", () => {
     expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" })).toBe(
-      "claude-opus-4-6",
+      "claude-opus-4-7",
     );
     expect(
       resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
-    ).toBe("claude-opus-4-6");
+    ).toBe("claude-opus-4-7");
   });
 
   it("returns the model as-is for Codex selections", () => {

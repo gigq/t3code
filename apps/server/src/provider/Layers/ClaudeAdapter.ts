@@ -2704,7 +2704,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
         settingSources: [...CLAUDE_SETTING_SOURCES],
-        ...(effectiveEffort ? { effort: effectiveEffort } : {}),
+        ...(effectiveEffort
+          ? { effort: effectiveEffort as NonNullable<ClaudeQueryOptions["effort"]> }
+          : {}),
         ...(permissionMode ? { permissionMode } : {}),
         ...(permissionMode === "bypassPermissions"
           ? { allowDangerouslySkipPermissions: true }
