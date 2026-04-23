@@ -77,8 +77,15 @@ export function buildForkedThreadTitle(sourceTitle: string): string {
 
 export function selectForkableMessages(
   thread: Pick<OrchestrationThread, "messages">,
+  throughMessageId?: string,
 ): ReadonlyArray<ForkableOrchestrationMessage> {
-  return thread.messages.filter(isForkableMessage);
+  if (!throughMessageId) {
+    return thread.messages.filter(isForkableMessage);
+  }
+  const limitIndex = thread.messages.findIndex((message) => message.id === throughMessageId);
+  const boundedMessages =
+    limitIndex >= 0 ? thread.messages.slice(0, limitIndex + 1) : thread.messages;
+  return boundedMessages.filter(isForkableMessage);
 }
 
 export function isForkableMessage(
@@ -144,11 +151,20 @@ function readCompactionStartMessageId(activity: OrchestrationThreadActivity): st
 
 export function findLatestForkCompaction(
   thread: Pick<OrchestrationThread, "activities">,
+  maxCreatedAt?: string,
 ): ForkBootstrapCompaction | null {
+  const maxCreatedAtMs =
+    maxCreatedAt && Number.isFinite(Date.parse(maxCreatedAt)) ? Date.parse(maxCreatedAt) : null;
   for (let index = thread.activities.length - 1; index >= 0; index -= 1) {
     const activity = thread.activities[index];
     if (!activity || activity.kind !== "context-compaction") {
       continue;
+    }
+    if (maxCreatedAtMs !== null) {
+      const activityCreatedAtMs = Date.parse(activity.createdAt);
+      if (Number.isFinite(activityCreatedAtMs) && activityCreatedAtMs > maxCreatedAtMs) {
+        continue;
+      }
     }
     const startMessageId = readCompactionStartMessageId(activity);
     return {
@@ -162,20 +178,34 @@ export function findLatestForkCompaction(
 
 export function selectForkBootstrapMessages(input: {
   readonly thread: Pick<OrchestrationThread, "messages" | "activities">;
+  readonly throughMessageId?: string;
   readonly beforeMessageId?: string;
 }): {
   readonly compaction: ForkBootstrapCompaction | null;
   readonly history: ReadonlyArray<ForkableOrchestrationMessage>;
 } {
-  const compaction = findLatestForkCompaction(input.thread);
   const cutoffMs =
+    input.beforeMessageId !== undefined
+      ? input.thread.messages.find((message) => message.id === input.beforeMessageId)?.createdAt
+      : input.throughMessageId !== undefined
+        ? input.thread.messages.find((message) => message.id === input.throughMessageId)?.createdAt
+        : undefined;
+  const compaction = findLatestForkCompaction(input.thread, cutoffMs);
+  const cutoffCompactionMs =
     compaction && Number.isFinite(Date.parse(compaction.compactedAt))
       ? Date.parse(compaction.compactedAt)
       : null;
   const limitIndex =
     input.beforeMessageId !== undefined
       ? input.thread.messages.findIndex((message) => message.id === input.beforeMessageId)
-      : input.thread.messages.length;
+      : input.throughMessageId !== undefined
+        ? (() => {
+            const index = input.thread.messages.findIndex(
+              (message) => message.id === input.throughMessageId,
+            );
+            return index >= 0 ? index + 1 : input.thread.messages.length;
+          })()
+        : input.thread.messages.length;
   const boundedMessages =
     limitIndex >= 0 ? input.thread.messages.slice(0, limitIndex) : input.thread.messages;
   const forkableMessages = boundedMessages.filter(isForkableMessage);
@@ -188,11 +218,11 @@ export function selectForkBootstrapMessages(input: {
           return startIndex >= 0 ? forkableMessages.slice(startIndex) : forkableMessages;
         })()
       : forkableMessages.filter((message): message is ForkableOrchestrationMessage => {
-          if (cutoffMs === null) {
+          if (cutoffCompactionMs === null) {
             return true;
           }
           const messageCreatedAtMs = Date.parse(message.createdAt);
-          return Number.isFinite(messageCreatedAtMs) && messageCreatedAtMs >= cutoffMs;
+          return Number.isFinite(messageCreatedAtMs) && messageCreatedAtMs >= cutoffCompactionMs;
         });
 
   return {

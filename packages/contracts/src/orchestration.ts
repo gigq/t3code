@@ -1266,6 +1266,7 @@ export class OrchestrationImportCodexThreadError extends Schema.TaggedErrorClass
 
 export const OrchestrationForkThreadInput = Schema.Struct({
   sourceThreadId: ThreadId,
+  sourceMessageId: Schema.optional(MessageId),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,

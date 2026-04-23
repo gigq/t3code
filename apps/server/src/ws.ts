@@ -232,9 +232,32 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           );
         }
 
+        if (input.sourceMessageId) {
+          const sourceMessage = sourceThread.messages.find(
+            (message) => message.id === input.sourceMessageId,
+          );
+          if (!sourceMessage) {
+            return yield* Effect.fail(
+              new Error(
+                `Source message '${input.sourceMessageId}' was not found on thread '${input.sourceThreadId}'.`,
+              ),
+            );
+          }
+          if (
+            sourceMessage.role !== "user" ||
+            sourceMessage.streaming ||
+            (sourceMessage.text.trim().length === 0 &&
+              (sourceMessage.attachments?.length ?? 0) === 0)
+          ) {
+            return yield* Effect.fail(
+              new Error("Fork-from-message requires a completed user message."),
+            );
+          }
+        }
+
         const createdAt = new Date().toISOString();
         const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
-        const sourceForkableMessages = selectForkableMessages(sourceThread);
+        const sourceForkableMessages = selectForkableMessages(sourceThread, input.sourceMessageId);
         const forkedMessages = buildForkedOrchestrationMessages({
           threadId,
           messages: sourceForkableMessages,
@@ -242,6 +265,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         });
         const sourceBootstrap = selectForkBootstrapMessages({
           thread: sourceThread,
+          ...(input.sourceMessageId ? { throughMessageId: input.sourceMessageId } : {}),
         });
         const sourceCompaction = findLatestForkCompaction(sourceThread);
         const title = input.title?.trim() || buildForkedThreadTitle(sourceThread.title);

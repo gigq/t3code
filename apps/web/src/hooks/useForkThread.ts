@@ -1,4 +1,4 @@
-import { type ModelSelection, type ThreadId } from "@t3tools/contracts";
+import { type MessageId, type ModelSelection, type ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -11,6 +11,7 @@ export function useForkThread() {
   const forkThread = useCallback(
     async (input: {
       readonly sourceThreadId: ThreadId;
+      readonly sourceMessageId?: MessageId;
       readonly modelSelection: ModelSelection;
       readonly runtimeMode: Thread["runtimeMode"];
       readonly interactionMode: Thread["interactionMode"];
@@ -23,6 +24,7 @@ export function useForkThread() {
 
       const result = await api.orchestration.forkThread({
         sourceThreadId: input.sourceThreadId,
+        ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
         modelSelection: input.modelSelection,
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,

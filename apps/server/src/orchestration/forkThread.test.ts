@@ -84,6 +84,19 @@ describe("forkThread helpers", () => {
         turnId,
       },
     ]);
+
+    expect(selectForkableMessages(thread, MessageId.makeUnsafe("message-user"))).toEqual([
+      {
+        id: MessageId.makeUnsafe("message-user"),
+        role: "user",
+        text: "Review this thread",
+        streaming: false,
+        attachments: [],
+        createdAt: "2026-04-12T01:00:01.000Z",
+        updatedAt: "2026-04-12T01:00:01.000Z",
+        turnId: null,
+      },
+    ]);
   });
 
   it("builds stable imported messages and a bootstrap prompt", () => {
@@ -258,6 +271,77 @@ describe("forkThread helpers", () => {
     expect(prompt).not.toContain("Old context before compaction");
     expect(prompt).toContain("Follow-up after compaction");
     expect(prompt).toContain("Answer after compaction");
+  });
+
+  it("ignores messages and compactions after an explicit fork message boundary", () => {
+    const turnId = TurnId.makeUnsafe("turn-source");
+    const thread = {
+      messages: [
+        {
+          id: MessageId.makeUnsafe("message-before"),
+          role: "user",
+          text: "Before compaction",
+          streaming: false,
+          attachments: [],
+          createdAt: "2026-04-12T01:00:01.000Z",
+          updatedAt: "2026-04-12T01:00:01.000Z",
+          turnId: null,
+        },
+        {
+          id: MessageId.makeUnsafe("message-branch"),
+          role: "user",
+          text: "Branch from here",
+          streaming: false,
+          attachments: [],
+          createdAt: "2026-04-12T01:04:00.000Z",
+          updatedAt: "2026-04-12T01:04:00.000Z",
+          turnId: null,
+        },
+        {
+          id: MessageId.makeUnsafe("message-later-assistant"),
+          role: "assistant",
+          text: "Later answer that should not carry over",
+          streaming: false,
+          attachments: [],
+          createdAt: "2026-04-12T01:06:00.000Z",
+          updatedAt: "2026-04-12T01:06:00.000Z",
+          turnId,
+        },
+      ] satisfies OrchestrationMessage[],
+      activities: [
+        {
+          id: "activity-earlier" as never,
+          tone: "info" as const,
+          kind: "context-compaction",
+          summary: "Context compacted",
+          payload: { detail: "Earlier summary" },
+          turnId: null,
+          createdAt: "2026-04-12T01:03:00.000Z",
+        },
+        {
+          id: "activity-later" as never,
+          tone: "info" as const,
+          kind: "context-compaction",
+          summary: "Context compacted",
+          payload: { detail: "Later summary" },
+          turnId: null,
+          createdAt: "2026-04-12T01:05:00.000Z",
+        },
+      ],
+    };
+
+    const bootstrap = selectForkBootstrapMessages({
+      thread,
+      throughMessageId: MessageId.makeUnsafe("message-branch"),
+    });
+
+    expect(bootstrap.compaction).toEqual({
+      compactedAt: "2026-04-12T01:03:00.000Z",
+      summary: "Earlier summary",
+    });
+    expect(bootstrap.history.map((message) => message.id)).toEqual([
+      MessageId.makeUnsafe("message-branch"),
+    ]);
   });
 
   it("prefers an explicit imported-message compaction boundary over timestamps", () => {

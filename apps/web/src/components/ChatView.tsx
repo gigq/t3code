@@ -763,6 +763,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
+  const [forkDialogSourceMessageId, setForkDialogSourceMessageId] = useState<MessageId | null>(
+    null,
+  );
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
     null,
   );
@@ -1025,12 +1028,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!isServerThread || !activeThread) {
       return;
     }
+    setForkDialogSourceMessageId(null);
     setForkDialogOpen(true);
     setComposerHighlightedItemId(null);
   }, [activeThread, isServerThread]);
 
+  const openForkDialogForUserMessage = useCallback(
+    (messageId: MessageId) => {
+      if (!isServerThread || !activeThread) {
+        return;
+      }
+      setForkDialogSourceMessageId(messageId);
+      setForkDialogOpen(true);
+      setComposerHighlightedItemId(null);
+    },
+    [activeThread, isServerThread],
+  );
+
   const closeForkDialog = useCallback(() => {
     setForkDialogOpen(false);
+    setForkDialogSourceMessageId(null);
   }, []);
 
   const openOrReuseProjectDraftThread = useCallback(
@@ -3824,12 +3841,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   const onForkActiveThread = useCallback(
-    async (input: { readonly modelSelection: ModelSelection; readonly title?: string }) => {
+    async (input: {
+      readonly modelSelection: ModelSelection;
+      readonly title?: string;
+      readonly sourceMessageId?: MessageId;
+    }) => {
       if (!activeThread || !isServerThread) {
         return;
       }
       await forkThread({
         sourceThreadId: activeThread.id,
+        ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
         modelSelection: input.modelSelection,
         runtimeMode,
         interactionMode: "default",
@@ -4314,6 +4336,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                {...(isServerThread ? { onForkUserMessage: openForkDialogForUserMessage } : {})}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
@@ -4774,6 +4797,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             <ForkThreadDialog
               open={forkDialogOpen}
               sourceThreadTitle={activeThread.title}
+              sourceMessageId={forkDialogSourceMessageId}
               sourceModelSelection={selectedModelSelection}
               providers={providerStatuses}
               modelOptionsByProvider={modelOptionsByProvider}
@@ -4783,7 +4807,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   closeForkDialog();
                 }
               }}
-              onSubmit={onForkActiveThread}
+              onSubmit={(input) =>
+                onForkActiveThread({
+                  ...input,
+                  ...(forkDialogSourceMessageId
+                    ? { sourceMessageId: forkDialogSourceMessageId }
+                    : {}),
+                })
+              }
             />
           ) : null}
         </div>

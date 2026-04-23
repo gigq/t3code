@@ -20,6 +20,7 @@ import { Input } from "./ui/input";
 interface ForkThreadDialogProps {
   readonly open: boolean;
   readonly sourceThreadTitle: string;
+  readonly sourceMessageId?: string | null;
   readonly sourceModelSelection: ModelSelection;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly modelOptionsByProvider: Record<
@@ -37,6 +38,7 @@ interface ForkThreadDialogProps {
 export function ForkThreadDialog({
   open,
   sourceThreadTitle,
+  sourceMessageId = null,
   sourceModelSelection,
   providers,
   modelOptionsByProvider,
@@ -111,9 +113,12 @@ export function ForkThreadDialog({
           <DialogTitle>Fork Thread</DialogTitle>
           <DialogDescription>
             Create a new thread from{" "}
-            <span className="font-medium text-foreground">{sourceThreadTitle}</span>. The fork keeps
-            the current access mode and starts in Chat mode so you can continue with a different
-            provider or model.
+            <span className="font-medium text-foreground">{sourceThreadTitle}</span>
+            {sourceMessageId
+              ? ". The fork will include conversation history through the selected user message."
+              : "."}{" "}
+            The fork keeps the current access mode and starts in Chat mode so you can continue with
+            a different provider or model.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">

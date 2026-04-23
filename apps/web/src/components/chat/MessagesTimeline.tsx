@@ -26,6 +26,7 @@ import {
   Clock3Icon,
   EyeIcon,
   GlobeIcon,
+  GitForkIcon,
   HammerIcon,
   type LucideIcon,
   SquarePenIcon,
@@ -83,6 +84,7 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onForkUserMessage?: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   markdownCwd: string | undefined;
@@ -118,6 +120,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onForkUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
   markdownCwd,
@@ -419,6 +422,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     {displayedUserMessage.copyText && (
                       <MessageCopyButton text={displayedUserMessage.copyText} />
+                    )}
+                    {onForkUserMessage && (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={() => onForkUserMessage(row.message.id)}
+                        title="Fork from this message"
+                      >
+                        <GitForkIcon className="size-3" />
+                      </Button>
                     )}
                     {canRevertAgentWork && (
                       <Button
