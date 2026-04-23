@@ -3253,6 +3253,68 @@ describe("ProviderRuntimeIngestion", () => {
     expect(checkpoint?.checkpointRef).toBe("provider-diff:evt-turn-diff-updated");
   });
 
+  it("preserves completed MCP tool payload data for projected thread activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-item-completed-mcp"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-p1"),
+      itemId: asItemId("item-p1-mcp"),
+      payload: {
+        itemType: "mcp_tool_call",
+        status: "completed",
+        title: "MCP tool call",
+        data: {
+          item: {
+            tool: "get_app_state",
+            server: "desktop-use",
+            result: {
+              content: [
+                {
+                  type: "image",
+                  data: "ZmFrZS1wbmc=",
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-item-completed-mcp",
+      ),
+    );
+
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-item-completed-mcp",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+    const data =
+      payload?.data && typeof payload.data === "object"
+        ? (payload.data as Record<string, unknown>)
+        : undefined;
+    const item =
+      data?.item && typeof data.item === "object"
+        ? (data.item as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.completed");
+    expect(payload?.itemType).toBe("mcp_tool_call");
+    expect(payload?.title).toBe("MCP tool call");
+    expect(item?.tool).toBe("get_app_state");
+    expect(item?.server).toBe("desktop-use");
+  });
+
   it("projects context window updates into normalized thread activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

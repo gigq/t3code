@@ -176,6 +176,7 @@
     "node-pty",
   ],
   "overrides": {
+    "@effect/platform-node-shared": "4.0.0-beta.43",
     "vite": "^8.0.0",
   },
   "catalog": {
@@ -285,7 +286,7 @@
 
     "@effect/platform-node": ["@effect/platform-node@4.0.0-beta.43", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.43", "mime": "^4.1.0", "undici": "^7.24.0" }, "peerDependencies": { "effect": "^4.0.0-beta.43", "ioredis": "^5.7.0" } }, "sha512-Uq6E1rjaIpjHauzjwoB2HzAg3battYt2Boy8XO50GoHiWCXKE6WapYZ0/AnaBx5v5qg2sOfqpuiLsUf9ZgxOkA=="],
 
-    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.48", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.20.0" }, "peerDependencies": { "effect": "^4.0.0-beta.48" } }, "sha512-wlhcdDHyacydCgiWdM8JwtQkViQhZsC8uJZ9wMoZXYxlCTvqfdzLeWw4A1UVMoq7sS6/KR1aZVeFkUjrqonncQ=="],
+    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.43", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.19.0" }, "peerDependencies": { "effect": "^4.0.0-beta.43" } }, "sha512-A9q0GEb61pYcQ06Dr6gXj1nKlDI3KHsar1sk3qb1ZY+kVSR64tBAylI8zGon23KY+NPtTUj/sEIToB7jc3Qt5w=="],
 
     "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-beta.43", "", { "peerDependencies": { "effect": "^4.0.0-beta.43" } }, "sha512-Ryb7x0rBjW5NHegbzvz9y2Yv4KpwZ1UiPk7/Rv+Mkux74Qkjdmotmrvy9P+M5A9TZyL2Av+GpaLTPJKsL0PG+Q=="],
 

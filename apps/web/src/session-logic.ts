@@ -42,6 +42,11 @@ export interface WorkLogEntry {
   command?: string;
   rawCommand?: string;
   changedFiles?: ReadonlyArray<string>;
+  screenshots?: ReadonlyArray<{
+    id: string;
+    name: string;
+    previewUrl: string;
+  }>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
@@ -558,6 +563,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       : null;
   const commandPreview = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
+  const screenshots = extractToolScreenshots(activity.id, payload);
   const title = extractToolTitle(payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
@@ -588,6 +594,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
+  }
+  if (screenshots.length > 0) {
+    entry.screenshots = screenshots;
   }
   if (title) {
     entry.toolTitle = title;
@@ -655,6 +664,7 @@ function mergeDerivedWorkLogEntries(
   next: DerivedWorkLogEntry,
 ): DerivedWorkLogEntry {
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
+  const screenshots = next.screenshots ?? previous.screenshots;
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
@@ -669,6 +679,7 @@ function mergeDerivedWorkLogEntries(
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
+    ...(screenshots ? { screenshots } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
@@ -909,7 +920,94 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
 }
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
-  return asTrimmedString(payload?.title);
+  const title = asTrimmedString(payload?.title);
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const toolName = asTrimmedString(item?.tool) ?? asTrimmedString(data?.toolName);
+  const normalizedToolName = toolName?.replace(/[_-]+/g, " ") ?? null;
+  if (
+    normalizedToolName &&
+    (title === null ||
+      title.toLowerCase() === "mcp tool call" ||
+      title.toLowerCase() === "tool call")
+  ) {
+    return normalizedToolName;
+  }
+  return title;
+}
+
+function extractToolScreenshots(
+  activityId: string,
+  payload: Record<string, unknown> | null,
+): Array<{
+  id: string;
+  name: string;
+  previewUrl: string;
+}> {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const result = asRecord(item?.result) ?? asRecord(data?.result);
+  const content = Array.isArray(result?.content)
+    ? result.content
+    : Array.isArray(data?.content)
+      ? data.content
+      : null;
+  if (!content) {
+    return [];
+  }
+
+  const toolName = asTrimmedString(item?.tool) ?? asTrimmedString(data?.toolName) ?? "tool";
+  let screenshotIndex = 0;
+  const screenshots = content
+    .map((entry) => {
+      const block = asRecord(entry);
+      if (!block) {
+        return null;
+      }
+
+      const type = asTrimmedString(block.type);
+      if (type === "image") {
+        const base64 = asTrimmedString(block.data);
+        if (!base64) {
+          return null;
+        }
+        screenshotIndex += 1;
+        const mimeType =
+          asTrimmedString(block.media_type) ?? asTrimmedString(block.mimeType) ?? "image/png";
+        return {
+          id: `${activityId}:screenshot:${screenshotIndex}`,
+          name: `${toolName} screenshot ${screenshotIndex}`,
+          previewUrl: `data:${mimeType};base64,${base64}`,
+        };
+      }
+
+      if (type === "image_url") {
+        const imageUrl = asRecord(block.image_url);
+        const src = asTrimmedString(imageUrl?.url) ?? asTrimmedString(block.url);
+        if (!src) {
+          return null;
+        }
+        screenshotIndex += 1;
+        return {
+          id: `${activityId}:screenshot:${screenshotIndex}`,
+          name: `${toolName} screenshot ${screenshotIndex}`,
+          previewUrl: src,
+        };
+      }
+
+      return null;
+    })
+    .filter(
+      (
+        screenshot,
+      ): screenshot is {
+        id: string;
+        name: string;
+        previewUrl: string;
+      } => screenshot !== null,
+    );
+
+  return screenshots;
 }
 
 function stripTrailingExitCode(value: string): {

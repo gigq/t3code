@@ -350,7 +350,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               )}
               <div className="space-y-0.5">
                 {visibleEntries.map((workEntry) => (
-                  <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
+                  <SimpleWorkEntryRow
+                    key={`work-row:${workEntry.id}`}
+                    workEntry={workEntry}
+                    onImageExpand={onImageExpand}
+                  />
                 ))}
               </div>
             </div>
@@ -837,8 +841,9 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
 }) {
-  const { workEntry } = props;
+  const { workEntry, onImageExpand } = props;
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -847,6 +852,8 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const screenshots = workEntry.screenshots ?? [];
+  const screenshotCount = screenshots.length;
 
   return (
     <div className="rounded-lg px-1 py-1">
@@ -898,6 +905,22 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </p>
           </div>
         </div>
+        {screenshotCount > 0 && (
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground/75 transition-colors hover:text-foreground/85"
+            onClick={() => {
+              const selectedImageId = screenshots[0]?.id;
+              if (!selectedImageId) return;
+              const preview = buildExpandedImagePreview(screenshots, selectedImageId);
+              if (!preview) return;
+              onImageExpand(preview);
+            }}
+          >
+            <EyeIcon className="size-3" />
+            <span>{screenshotCount === 1 ? "Screenshot" : `${screenshotCount} screenshots`}</span>
+          </button>
+        )}
       </div>
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">

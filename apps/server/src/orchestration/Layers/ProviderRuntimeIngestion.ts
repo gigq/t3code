@@ -92,6 +92,12 @@ function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
+function shouldPersistCompletedToolData(
+  event: Extract<ProviderRuntimeEvent, { type: "item.completed" }>,
+) {
+  return event.payload.itemType === "mcp_tool_call" && event.payload.data !== undefined;
+}
+
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
@@ -533,6 +539,7 @@ function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
@@ -555,7 +562,9 @@ function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(shouldPersistCompletedToolData(event) ? { data: event.payload.data } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

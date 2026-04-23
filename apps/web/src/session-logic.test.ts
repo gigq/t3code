@@ -866,6 +866,48 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("extracts MCP tool names and screenshot previews from completed tool payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mcp-tool-with-screenshot",
+        kind: "tool.completed",
+        summary: "MCP tool call",
+        payload: {
+          itemType: "mcp_tool_call",
+          title: "MCP tool call",
+          data: {
+            item: {
+              server: "desktop-use",
+              tool: "get_app_state",
+              result: {
+                content: [
+                  {
+                    type: "text",
+                    text: "Computer Use state...",
+                  },
+                  {
+                    type: "image",
+                    data: "ZmFrZS1wbmc=",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.toolTitle).toBe("get app state");
+    expect(entry?.screenshots).toEqual([
+      {
+        id: "mcp-tool-with-screenshot:screenshot:1",
+        name: "get_app_state screenshot 1",
+        previewUrl: "data:image/png;base64,ZmFrZS1wbmc=",
+      },
+    ]);
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1408,11 +1450,13 @@ describe("PROVIDER_OPTIONS", () => {
   it("advertises Claude and Copilot while keeping Cursor as a placeholder", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeAgent");
     const copilot = PROVIDER_OPTIONS.find((option) => option.value === "copilot");
+    const opencode = PROVIDER_OPTIONS.find((option) => option.value === "opencode");
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
       { value: "claudeAgent", label: "Claude", available: true },
       { value: "copilot", label: "Copilot", available: true },
+      { value: "opencode", label: "OpenCode", available: true },
       { value: "cursor", label: "Cursor", available: false },
     ]);
     expect(claude).toEqual({
@@ -1423,6 +1467,11 @@ describe("PROVIDER_OPTIONS", () => {
     expect(copilot).toEqual({
       value: "copilot",
       label: "Copilot",
+      available: true,
+    });
+    expect(opencode).toEqual({
+      value: "opencode",
+      label: "OpenCode",
       available: true,
     });
     expect(cursor).toEqual({
