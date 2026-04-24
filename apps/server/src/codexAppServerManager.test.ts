@@ -245,6 +245,10 @@ describe("process stderr events", () => {
 });
 
 describe("normalizeCodexModelSlug", () => {
+  it("maps 5.5 alias to gpt-5.5", () => {
+    expect(normalizeCodexModelSlug("5.5")).toBe("gpt-5.5");
+  });
+
   it("maps 5.3 aliases to gpt-5.3-codex", () => {
     expect(normalizeCodexModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeCodexModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
