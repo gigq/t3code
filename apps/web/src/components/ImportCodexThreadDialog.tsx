@@ -16,13 +16,23 @@ import { Input } from "./ui/input";
 interface ImportCodexThreadDialogProps {
   readonly open: boolean;
   readonly projectName: string;
+  readonly provider: "codex" | "claudeAgent";
   readonly onOpenChange: (open: boolean) => void;
   readonly onSubmit: (input: { providerThreadId: string; title?: string }) => Promise<void>;
+}
+
+const CLAUDE_SESSION_ID_REGEX =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+
+function extractClaudeSessionId(raw: string): string | null {
+  const match = CLAUDE_SESSION_ID_REGEX.exec(raw.trim());
+  return match?.[0] ?? null;
 }
 
 export function ImportCodexThreadDialog({
   open,
   projectName,
+  provider,
   onOpenChange,
   onSubmit,
 }: ImportCodexThreadDialogProps) {
@@ -51,9 +61,16 @@ export function ImportCodexThreadDialog({
   }, [open]);
 
   const handleSubmit = async () => {
-    const normalizedProviderThreadId = extractCodexThreadId(providerThreadId);
+    const normalizedProviderThreadId =
+      provider === "codex"
+        ? extractCodexThreadId(providerThreadId)
+        : extractClaudeSessionId(providerThreadId);
     if (!normalizedProviderThreadId) {
-      setError("Enter a valid Codex session or thread ID.");
+      setError(
+        provider === "codex"
+          ? "Enter a valid Codex session or thread ID."
+          : "Enter a valid Claude session ID.",
+      );
       return;
     }
 
@@ -71,12 +88,25 @@ export function ImportCodexThreadDialog({
       onOpenChange(false);
     } catch (submitError) {
       setError(
-        submitError instanceof Error ? submitError.message : "Failed to import Codex thread.",
+        submitError instanceof Error
+          ? submitError.message
+          : provider === "codex"
+            ? "Failed to import Codex thread."
+            : "Failed to import Claude thread.",
       );
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const providerLabel = provider === "codex" ? "Codex" : "Claude";
+  const providerIdLabel = provider === "codex" ? "Codex session or thread ID" : "Claude session ID";
+  const titlePlaceholder =
+    provider === "codex" ? "Imported Codex thread" : "Imported Claude thread";
+  const idPlaceholder =
+    provider === "codex"
+      ? "019d1c3b-3d2a-7fb0-bca8-1290528ded4a"
+      : "550e8400-e29b-41d4-a716-446655440000";
 
   return (
     <Dialog
@@ -89,18 +119,21 @@ export function ImportCodexThreadDialog({
     >
       <DialogPopup className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Import Codex Thread</DialogTitle>
+          <DialogTitle>Import {providerLabel} Thread</DialogTitle>
           <DialogDescription>
-            Paste a Codex session or thread ID to create a new thread in {projectName}. T3 will
-            resume that session and copy its user and assistant messages into the new thread.
+            Paste a {providerLabel} session ID to create a new thread in {projectName}. T3 will keep
+            the resume binding and reconnect to that provider session on the next turn.
+            {provider === "claudeAgent"
+              ? " Claude may not expose historical transcript content during import."
+              : null}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
           <label className="grid gap-1.5">
-            <span className="text-xs font-medium text-foreground">Codex session or thread ID</span>
+            <span className="text-xs font-medium text-foreground">{providerIdLabel}</span>
             <Input
               ref={providerThreadIdInputRef}
-              placeholder="019d1c3b-3d2a-7fb0-bca8-1290528ded4a"
+              placeholder={idPlaceholder}
               value={providerThreadId}
               onChange={(event) => {
                 setProviderThreadId(event.target.value);
@@ -122,7 +155,7 @@ export function ImportCodexThreadDialog({
           <label className="grid gap-1.5">
             <span className="text-xs font-medium text-foreground">Title override (optional)</span>
             <Input
-              placeholder="Imported Codex thread"
+              placeholder={titlePlaceholder}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
             />

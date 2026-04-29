@@ -198,12 +198,14 @@ describe("ProviderCommandReactor", () => {
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const service: ProviderServiceShape = {
       startSession: startSession as ProviderServiceShape["startSession"],
+      bindSession: () => unsupported(),
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
       readThread: () => unsupported(),
+      readThreadRuntimeEvents: () => Effect.succeed([]),
       listSessions: () => Effect.succeed(runtimeSessions),
       getCapabilities: (_provider) =>
         Effect.succeed({
@@ -251,6 +253,7 @@ describe("ProviderCommandReactor", () => {
         projectId: asProjectId("project-1"),
         title: "Provider Project",
         workspaceRoot: "/tmp/provider-project",
+        location: { kind: "local" },
         defaultModelSelection: modelSelection,
         createdAt: now,
       }),

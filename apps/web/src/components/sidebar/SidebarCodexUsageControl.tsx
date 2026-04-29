@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ServerCodexUsage, ServerCodexUsageWindow } from "@t3tools/contracts";
+import type {
+  ServerCodexUsage,
+  ServerCodexUsageWindow,
+  ServerProviderUsage,
+} from "@t3tools/contracts";
 import { ActivityIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
@@ -70,6 +74,70 @@ function UsageWindowCard(props: {
   );
 }
 
+function providerLabel(provider: string): string {
+  switch (provider) {
+    case "codex":
+      return "Codex";
+    case "claude":
+      return "Claude";
+    default:
+      return provider;
+  }
+}
+
+function providerAccentClass(provider: string, secondary = false): string {
+  if (provider === "claude") {
+    return secondary ? "bg-orange-400/55" : "bg-orange-400/80";
+  }
+  return secondary ? "bg-foreground/55" : "bg-foreground/80";
+}
+
+function ProviderUsageSection(props: { title: string; usage: ServerProviderUsage }) {
+  const { title, usage } = props;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3 px-1">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          {title}
+        </div>
+        <div className="truncate text-[11px] text-muted-foreground">
+          {usage.accountEmail ?? usage.source ?? usage.provider}
+        </div>
+      </div>
+      <UsageWindowCard
+        label="Session"
+        window={usage.primary}
+        accentClassName={providerAccentClass(usage.provider)}
+      />
+      {usage.secondary ? (
+        <UsageWindowCard
+          label="Weekly"
+          window={usage.secondary}
+          accentClassName={providerAccentClass(usage.provider, true)}
+        />
+      ) : null}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            Credits
+          </div>
+          <div className="mt-1 text-sm font-semibold text-foreground">
+            {formatCredits(usage.creditsRemaining)}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            Source
+          </div>
+          <div className="mt-1 truncate text-sm font-semibold text-foreground">
+            {usage.source ?? usage.provider}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CodexUsageContent(props: {
   isLoading: boolean;
   usage: ServerCodexUsage | undefined;
@@ -98,14 +166,18 @@ function CodexUsageContent(props: {
     );
   }
 
-  if (!usage || !usage.available) {
+  const additionalProviders = usage?.additionalProviders ?? [];
+  const availableAdditionalProviders = additionalProviders.filter((provider) => provider.available);
+  const hasAnyAvailable = Boolean(usage?.available || availableAdditionalProviders.length > 0);
+
+  if (!usage || !hasAnyAvailable) {
     return (
       <div className="space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-foreground">Codex usage</div>
+            <div className="text-sm font-semibold text-foreground">T3 Code usage</div>
             <div className="text-xs text-muted-foreground">
-              {usage?.error ?? "Codex usage is unavailable on this server."}
+              {usage?.error ?? "Usage is unavailable on this server."}
             </div>
           </div>
           <Button
@@ -141,9 +213,11 @@ function CodexUsageContent(props: {
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-foreground">Codex usage</div>
+          <div className="truncate text-sm font-semibold text-foreground">T3 Code usage</div>
           <div className="truncate text-xs text-muted-foreground">
-            {usage.accountEmail ?? "Unknown account"}
+            {usage.available
+              ? (usage.accountEmail ?? "Codex account")
+              : `${availableAdditionalProviders.length} provider available`}
           </div>
         </div>
         <Button
@@ -158,18 +232,23 @@ function CodexUsageContent(props: {
         </Button>
       </div>
 
-      <div className="space-y-2">
-        <UsageWindowCard label="Session" window={usage.primary} />
-        {usage.secondary ? (
-          <UsageWindowCard
-            label="Weekly"
-            window={usage.secondary}
-            accentClassName="bg-foreground/55"
-          />
-        ) : null}
-      </div>
+      {usage.available ? (
+        <ProviderUsageSection title="Codex" usage={usage} />
+      ) : (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 p-3 text-xs text-amber-100">
+          Codex usage unavailable: {usage.error ?? "Unknown error"}
+        </div>
+      )}
 
-      {usage.sparkPrimary || usage.sparkSecondary ? (
+      {availableAdditionalProviders.map((provider) => (
+        <ProviderUsageSection
+          key={provider.provider}
+          title={providerLabel(provider.provider)}
+          usage={provider}
+        />
+      ))}
+
+      {usage.available && (usage.sparkPrimary || usage.sparkSecondary) ? (
         <div className="space-y-2">
           <div className="px-1 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             GPT-5.3-Codex-Spark
@@ -214,25 +293,6 @@ function CodexUsageContent(props: {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
-          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Credits
-          </div>
-          <div className="mt-1 text-sm font-semibold text-foreground">
-            {formatCredits(usage.creditsRemaining)}
-          </div>
-        </div>
-        <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
-          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Source
-          </div>
-          <div className="mt-1 text-sm font-semibold text-foreground">
-            {usage.source ?? usage.provider}
-          </div>
-        </div>
-      </div>
-
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         {usage.loginMethod ? <span>Login: {usage.loginMethod}</span> : null}
         {usage.version ? <span>CLI: {usage.version}</span> : null}
@@ -256,13 +316,23 @@ export function SidebarCodexUsageControl(props: {
     enabled: open,
   });
 
-  const primaryLeftPercent = useMemo(
-    () => (query.data?.available ? (query.data.primary?.leftPercent ?? null) : null),
-    [query.data],
+  const primaryLeftPercent = useMemo(() => {
+    const providers = [
+      ...(query.data ? [query.data] : []),
+      ...(query.data?.additionalProviders ?? []),
+    ].filter((provider) => provider.available);
+    const percentages = providers
+      .map((provider) => provider.primary?.leftPercent ?? null)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    return percentages.length > 0 ? Math.min(...percentages) : null;
+  }, [query.data]);
+  const hasAvailableUsage = Boolean(
+    query.data?.available ||
+    query.data?.additionalProviders?.some((provider) => provider.available),
   );
   const triggerClassName = useMemo(
-    () => triggerToneClass(primaryLeftPercent, query.data?.available ?? null),
-    [primaryLeftPercent, query.data?.available],
+    () => triggerToneClass(primaryLeftPercent, query.data ? hasAvailableUsage : null),
+    [hasAvailableUsage, primaryLeftPercent, query.data],
   );
 
   return (

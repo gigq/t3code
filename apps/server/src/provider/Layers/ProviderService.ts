@@ -12,6 +12,7 @@
 import {
   ModelSelection,
   NonNegativeInt,
+  ProjectLocation,
   ThreadId,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
@@ -22,7 +23,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, PubSub, Schema, SchemaIssue, Stream } from "effect";
+import { Effect, Layer, Option, PubSub, Ref, Schema, SchemaIssue, Stream } from "effect";
 
 import {
   increment,
@@ -49,6 +50,8 @@ export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogPath?: string;
   readonly canonicalEventLogger?: EventNdjsonLogger;
 }
+
+const MAX_BUFFERED_RUNTIME_EVENTS_PER_THREAD = 500;
 
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
@@ -102,6 +105,7 @@ function toRuntimePayloadFromSession(
   session: ProviderSession,
   extra?: {
     readonly modelSelection?: unknown;
+    readonly projectLocation?: unknown;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
   },
@@ -112,6 +116,7 @@ function toRuntimePayloadFromSession(
     activeTurnId: session.status === "running" ? (session.activeTurnId ?? null) : null,
     lastError: session.lastError ?? null,
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
+    ...(extra?.projectLocation !== undefined ? { projectLocation: extra.projectLocation } : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
@@ -141,6 +146,16 @@ function readPersistedCwd(
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function readPersistedProjectLocation(
+  runtimePayload: ProviderRuntimeBinding["runtimePayload"],
+): ProjectLocation | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw = "projectLocation" in runtimePayload ? runtimePayload.projectLocation : undefined;
+  return Schema.is(ProjectLocation)(raw) ? raw : undefined;
+}
+
 const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
 ) {
@@ -157,9 +172,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventsByThreadId = yield* Ref.make(
+    new Map<ThreadId, ReadonlyArray<ProviderRuntimeEvent>>(),
+  );
+
+  const bufferRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+    Ref.update(runtimeEventsByThreadId, (current) => {
+      const next = new Map(current);
+      const buffered = next.get(event.threadId) ?? [];
+      next.set(
+        event.threadId,
+        buffered.length >= MAX_BUFFERED_RUNTIME_EVENTS_PER_THREAD
+          ? [...buffered.slice(1), event]
+          : [...buffered, event],
+      );
+      return next;
+    });
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
+      Effect.tap(bufferRuntimeEvent),
       Effect.tap((canonicalEvent) =>
         canonicalEventLogger ? canonicalEventLogger.write(canonicalEvent, null) : Effect.void,
       ),
@@ -172,6 +204,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     threadId: ThreadId,
     extra?: {
       readonly modelSelection?: unknown;
+      readonly projectLocation?: unknown;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
     },
@@ -236,11 +269,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const persistedProjectLocation = readPersistedProjectLocation(input.binding.runtimePayload);
 
       const resumed = yield* adapter.startSession({
         threadId: input.binding.threadId,
         provider: input.binding.provider,
         ...(persistedCwd ? { cwd: persistedCwd } : {}),
+        ...(persistedProjectLocation ? { projectLocation: persistedProjectLocation } : {}),
         ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
         ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
         runtimeMode: input.binding.runtimeMode ?? "full-access",
@@ -353,6 +388,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
         yield* upsertSessionBinding(session, threadId, {
           modelSelection: input.modelSelection,
+          projectLocation: input.projectLocation,
         });
         yield* analytics.record("provider.session.started", {
           provider: session.provider,
@@ -370,6 +406,98 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           counter: providerSessionsTotal,
           attributes: providerMetricAttributes(input.provider, {
             operation: "start",
+          }),
+        }),
+      );
+    },
+  );
+
+  const bindSession: ProviderServiceShape["bindSession"] = Effect.fn("bindSession")(
+    function* (threadId, rawInput) {
+      const parsed = yield* decodeInputOrValidationError({
+        operation: "ProviderService.bindSession",
+        schema: ProviderSessionStartInput,
+        payload: rawInput,
+      });
+
+      const input = {
+        ...parsed,
+        threadId,
+        provider: parsed.provider ?? "codex",
+      };
+      yield* Effect.annotateCurrentSpan({
+        "provider.operation": "bind-session",
+        "provider.kind": input.provider,
+        "provider.thread_id": threadId,
+        "provider.runtime_mode": input.runtimeMode,
+      });
+
+      return yield* Effect.gen(function* () {
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError((error) =>
+            toValidationError(
+              "ProviderService.bindSession",
+              `Failed to load provider settings: ${error.message}`,
+              error,
+            ),
+          ),
+        );
+        if (!settings.providers[input.provider].enabled) {
+          return yield* toValidationError(
+            "ProviderService.bindSession",
+            `Provider '${input.provider}' is disabled in T3 Code settings.`,
+          );
+        }
+
+        const adapter = yield* registry.getByProvider(input.provider);
+        const now = new Date().toISOString();
+        const session: ProviderSession = {
+          threadId,
+          provider: adapter.provider,
+          status: "closed",
+          runtimeMode: input.runtimeMode,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
+          ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        yield* directory.upsert({
+          threadId,
+          provider: adapter.provider,
+          runtimeMode: input.runtimeMode,
+          status: "stopped",
+          ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          runtimePayload: {
+            cwd: input.cwd ?? null,
+            model: input.modelSelection?.model ?? null,
+            activeTurnId: null,
+            lastError: null,
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+            ...(input.projectLocation !== undefined
+              ? { projectLocation: input.projectLocation }
+              : {}),
+            lastRuntimeEvent: "provider.bindSession",
+            lastRuntimeEventAt: now,
+          },
+        });
+        yield* analytics.record("provider.session.bound", {
+          provider: adapter.provider,
+          runtimeMode: input.runtimeMode,
+          hasResumeCursor: input.resumeCursor !== undefined,
+          hasCwd: typeof input.cwd === "string" && input.cwd.trim().length > 0,
+          hasModel:
+            typeof input.modelSelection?.model === "string" &&
+            input.modelSelection.model.trim().length > 0,
+        });
+
+        return session;
+      }).pipe(
+        withMetrics({
+          counter: providerSessionsTotal,
+          attributes: providerMetricAttributes(input.provider, {
+            operation: "bind",
           }),
         }),
       );
@@ -697,6 +825,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
     registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
 
+  const readThreadRuntimeEvents: ProviderServiceShape["readThreadRuntimeEvents"] = (threadId) =>
+    Ref.get(runtimeEventsByThreadId).pipe(
+      Effect.map((buffer) => buffer.get(threadId) ?? ([] as ReadonlyArray<ProviderRuntimeEvent>)),
+    );
+
   const rollbackConversation: ProviderServiceShape["rollbackConversation"] = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -780,6 +913,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   return {
     startSession,
+    bindSession,
     sendTurn,
     interruptTurn,
     respondToRequest,
@@ -788,6 +922,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     readThread,
     listSessions,
     getCapabilities,
+    readThreadRuntimeEvents,
     rollbackConversation,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

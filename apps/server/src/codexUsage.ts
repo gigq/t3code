@@ -1,10 +1,14 @@
 import path from "node:path";
 import { access } from "node:fs/promises";
 
-import type { ServerCodexUsage, ServerCodexUsageWindow } from "@t3tools/contracts";
+import type {
+  ServerCodexUsage,
+  ServerCodexUsageWindow,
+  ServerProviderUsage,
+} from "@t3tools/contracts";
 import { runProcess } from "./processRunner";
 
-const CODEXBAR_TIMEOUT_MS = 10_000;
+const CODEXBAR_TIMEOUT_MS = 20_000;
 const CODEXBAR_MAX_BUFFER_BYTES = 256 * 1024;
 const CODEX_STATUS_TIMEOUT_MS = 15_000;
 const CODEX_STATUS_MAX_BUFFER_BYTES = 512 * 1024;
@@ -26,10 +30,14 @@ type ParsedCodexStatusUsage = {
   sparkSecondary: ServerCodexUsageWindow | null;
 };
 
-function emptyCodexUsage(error: string): ServerCodexUsage {
+function providerDisplayName(provider: string): string {
+  return provider === "codex" ? "Codex" : provider;
+}
+
+function emptyProviderUsage(provider: string, error: string): ServerProviderUsage {
   return {
     available: false,
-    provider: "codex",
+    provider,
     accountEmail: null,
     loginMethod: null,
     source: null,
@@ -42,6 +50,10 @@ function emptyCodexUsage(error: string): ServerCodexUsage {
     updatedAt: null,
     error,
   };
+}
+
+function emptyCodexUsage(error: string): ServerCodexUsage {
+  return emptyProviderUsage("codex", error);
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -191,13 +203,20 @@ export function parseCodexStatusText(text: string): ParsedCodexStatusUsage | nul
     : null;
 }
 
-function normalizeCodexbarUsagePayloadInternal(payload: unknown): ServerCodexUsage {
+function normalizeCodexbarUsagePayloadInternal(
+  payload: unknown,
+  fallbackProvider = "codex",
+): ServerProviderUsage {
   const root = Array.isArray(payload) ? payload[0] : payload;
   const record = asRecord(root);
   if (!record) {
-    return emptyCodexUsage("Codex usage returned invalid JSON.");
+    return emptyProviderUsage(
+      fallbackProvider,
+      `${providerDisplayName(fallbackProvider)} usage returned invalid JSON.`,
+    );
   }
 
+  const provider = asNonEmptyString(record.provider) ?? fallbackProvider;
   const usage = asRecord(record.usage);
   const identity = asRecord(usage?.identity);
   const primary = normalizeUsageWindow(usage?.primary);
@@ -216,8 +235,11 @@ function normalizeCodexbarUsagePayloadInternal(payload: unknown): ServerCodexUsa
 
   if (!primary) {
     return {
-      ...emptyCodexUsage("Primary Codex usage window is missing."),
-      provider: asNonEmptyString(record.provider) ?? "codex",
+      ...emptyProviderUsage(
+        provider,
+        `Primary ${providerDisplayName(provider)} usage window is missing.`,
+      ),
+      provider,
       accountEmail,
       loginMethod,
       source,
@@ -230,7 +252,7 @@ function normalizeCodexbarUsagePayloadInternal(payload: unknown): ServerCodexUsa
 
   return {
     available: true,
-    provider: asNonEmptyString(record.provider) ?? "codex",
+    provider,
     accountEmail,
     loginMethod,
     source,
@@ -297,24 +319,34 @@ function mergeCodexUsage(
 }
 
 export function normalizeCodexbarUsagePayload(payload: unknown): ServerCodexUsage {
-  return normalizeCodexbarUsagePayloadInternal(payload);
+  return normalizeCodexbarUsagePayloadInternal(payload, "codex");
+}
+
+async function getCodexbarProviderUsage(provider: string): Promise<ServerProviderUsage> {
+  try {
+    const result = await runProcess(
+      "codexbar",
+      ["--provider", provider, "--source", "auto", "--format", "json"],
+      {
+        timeoutMs: CODEXBAR_TIMEOUT_MS,
+        maxBufferBytes: CODEXBAR_MAX_BUFFER_BYTES,
+        outputMode: "truncate",
+      },
+    );
+    return normalizeCodexbarUsagePayloadInternal(JSON.parse(result.stdout), provider);
+  } catch (error) {
+    return emptyProviderUsage(
+      provider,
+      error instanceof Error ? error.message : `Failed to load ${provider} usage.`,
+    );
+  }
 }
 
 export async function getCodexUsage(): Promise<ServerCodexUsage> {
-  const [codexbarResult, statusResult] = await Promise.allSettled([
-    (async () => {
-      const result = await runProcess(
-        "codexbar",
-        ["--provider", "codex", "--source", "cli", "--format", "json"],
-        {
-          timeoutMs: CODEXBAR_TIMEOUT_MS,
-          maxBufferBytes: CODEXBAR_MAX_BUFFER_BYTES,
-          outputMode: "truncate",
-        },
-      );
-      return normalizeCodexbarUsagePayloadInternal(JSON.parse(result.stdout));
-    })(),
+  const [codexbarResult, statusResult, claudeResult] = await Promise.allSettled([
+    getCodexbarProviderUsage("codex"),
     getCodexStatusUsage(),
+    getCodexbarProviderUsage("claude"),
   ]);
 
   const codexbarUsage =
@@ -327,5 +359,9 @@ export async function getCodexUsage(): Promise<ServerCodexUsage> {
         );
 
   const statusUsage = statusResult.status === "fulfilled" ? statusResult.value : null;
-  return mergeCodexUsage(codexbarUsage, statusUsage);
+  const claudeUsage = claudeResult.status === "fulfilled" ? claudeResult.value : null;
+  return {
+    ...mergeCodexUsage(codexbarUsage, statusUsage),
+    ...(claudeUsage ? { additionalProviders: [claudeUsage] } : {}),
+  };
 }

@@ -37,6 +37,16 @@ import {
 } from "../remoteRefs.ts";
 import { ServerConfig } from "../../config.ts";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+import {
+  RemoteWorkspaces,
+  type RemoteWorkspaceError,
+  type ResolvedRemoteWorkspace,
+} from "../../workspace/Services/RemoteWorkspaces.ts";
+import {
+  buildRemoteExecScript,
+  buildRemoteShellCommand,
+  buildSshArgs,
+} from "../../workspace/RemoteShell.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
@@ -634,6 +644,14 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   const path = yield* Path.Path;
   const { worktreesDir } = yield* ServerConfig;
 
+  const remoteWorkspacesOption = yield* Effect.serviceOption(RemoteWorkspaces);
+  const resolveRemoteWorkspace = (
+    cwd: string,
+  ): Effect.Effect<Option.Option<ResolvedRemoteWorkspace>, RemoteWorkspaceError> =>
+    Option.isSome(remoteWorkspacesOption)
+      ? remoteWorkspacesOption.value.resolveWorkspaceRoot(cwd)
+      : Effect.succeed(Option.none());
+
   let executeRaw: GitCoreShape["execute"];
 
   if (options?.executeOverride) {
@@ -645,18 +663,27 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         ...input,
         args: [...input.args],
       } as const;
+      const remoteWorkspace = yield* resolveRemoteWorkspace(commandInput.cwd).pipe(
+        Effect.mapError(toGitCommandError(commandInput, "failed to resolve remote workspace.")),
+      );
       const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
       const truncateOutputAtMaxBytes = input.truncateOutputAtMaxBytes ?? false;
 
       const runGitCommand = Effect.fn("runGitCommand")(function* () {
-        const trace2Monitor = yield* createTrace2Monitor(commandInput, input.progress).pipe(
-          Effect.provideService(Path.Path, path),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.mapError(toGitCommandError(commandInput, "failed to create trace2 monitor.")),
-        );
-        const child = yield* commandSpawner
-          .spawn(
+        const isRemote = Option.isSome(remoteWorkspace);
+        const trace2Monitor = isRemote
+          ? ({
+              env: {},
+              flush: Effect.void,
+            } satisfies Trace2Monitor)
+          : yield* createTrace2Monitor(commandInput, input.progress).pipe(
+              Effect.provideService(Path.Path, path),
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.mapError(toGitCommandError(commandInput, "failed to create trace2 monitor.")),
+            );
+        const childProcess = Option.match(remoteWorkspace, {
+          onNone: () =>
             ChildProcess.make("git", commandInput.args, {
               cwd: commandInput.cwd,
               env: {
@@ -665,7 +692,27 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
                 ...trace2Monitor.env,
               },
             }),
-          )
+          onSome: (workspace) =>
+            ChildProcess.make(
+              "ssh",
+              buildSshArgs(
+                workspace.location,
+                buildRemoteShellCommand({
+                  cwd: workspace.remoteCwd,
+                  script: buildRemoteExecScript({
+                    command: "git",
+                    args: commandInput.args,
+                    env: input.env,
+                  }),
+                }),
+              ),
+              {
+                env: process.env,
+              },
+            ),
+        });
+        const child = yield* commandSpawner
+          .spawn(childProcess)
           .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));
 
         const [stdout, stderr, exitCode] = yield* Effect.all(

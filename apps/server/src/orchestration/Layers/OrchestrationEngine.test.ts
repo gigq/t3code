@@ -93,7 +93,7 @@ describe("OrchestrationEngine", () => {
         ),
     };
 
-    const projectionSnapshot = {
+    const projectionSnapshot: import("@t3tools/contracts").OrchestrationReadModel = {
       snapshotSequence: 7,
       updatedAt: "2026-03-03T00:00:04.000Z",
       projects: [
@@ -101,6 +101,7 @@ describe("OrchestrationEngine", () => {
           id: asProjectId("project-bootstrap"),
           title: "Bootstrap Project",
           workspaceRoot: "/tmp/project-bootstrap",
+          location: { kind: "local" },
           defaultModelSelection: {
             provider: "codex" as const,
             model: "gpt-5-codex",
@@ -190,6 +191,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-1"),
         title: "Project 1",
         workspaceRoot: "/tmp/project-1",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -250,6 +252,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-archive"),
         title: "Project Archive",
         workspaceRoot: "/tmp/project-archive",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -317,6 +320,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-replay"),
         title: "Replay Project",
         workspaceRoot: "/tmp/project-replay",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -375,6 +379,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-stream"),
         title: "Stream Project",
         workspaceRoot: "/tmp/project-stream",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -436,6 +441,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-ack"),
         title: "Ack Project",
         workspaceRoot: "/tmp/project-ack",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -525,6 +531,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-turn-diff"),
         title: "Turn Diff Project",
         workspaceRoot: "/tmp/project-turn-diff",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -643,6 +650,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-flaky"),
         title: "Flaky Project",
         workspaceRoot: "/tmp/project-flaky",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -737,6 +745,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-atomic"),
         title: "Atomic Project",
         workspaceRoot: "/tmp/project-atomic",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -879,6 +888,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-sync"),
         title: "Sync Project",
         workspaceRoot: "/tmp/project-sync",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -964,6 +974,7 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-duplicate"),
         title: "Duplicate Project",
         workspaceRoot: "/tmp/project-duplicate",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",

@@ -105,9 +105,13 @@ export function createWsNativeApi(): NativeApi {
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,
       getBootstrapSnapshot: rpcClient.orchestration.getBootstrapSnapshot,
-      getThreadSnapshot: (threadId) => rpcClient.orchestration.getThreadSnapshot({ threadId }),
+      getThreadSnapshot: (input) =>
+        rpcClient.orchestration.getThreadSnapshot(
+          typeof input === "string" ? { threadId: input } : input,
+        ),
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       importCodexThread: rpcClient.orchestration.importCodexThread,
+      importClaudeThread: rpcClient.orchestration.importClaudeThread,
       forkThread: rpcClient.orchestration.forkThread,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
@@ -117,6 +121,8 @@ export function createWsNativeApi(): NativeApi {
           .then((events) => [...events]),
       onDomainEvent: (callback, options) =>
         rpcClient.orchestration.onDomainEvent(callback, options),
+      onProviderRuntimeEvent: (threadId, callback, options) =>
+        rpcClient.orchestration.onProviderRuntimeEvent({ threadId }, callback, options),
     },
   };
 

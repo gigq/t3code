@@ -6,7 +6,13 @@
  *
  * @module ProjectionProjectRepository
  */
-import { IsoDateTime, ModelSelection, ProjectId, ProjectScript } from "@t3tools/contracts";
+import {
+  IsoDateTime,
+  ModelSelection,
+  ProjectId,
+  ProjectLocation,
+  ProjectScript,
+} from "@t3tools/contracts";
 import { Option, Schema, ServiceMap } from "effect";
 import type { Effect } from "effect";
 
@@ -16,6 +22,7 @@ export const ProjectionProject = Schema.Struct({
   projectId: ProjectId,
   title: Schema.String,
   workspaceRoot: Schema.String,
+  location: ProjectLocation,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
@@ -28,6 +35,12 @@ export const GetProjectionProjectInput = Schema.Struct({
   projectId: ProjectId,
 });
 export type GetProjectionProjectInput = typeof GetProjectionProjectInput.Type;
+
+export const GetProjectionProjectByWorkspaceRootInput = Schema.Struct({
+  workspaceRoot: Schema.String,
+});
+export type GetProjectionProjectByWorkspaceRootInput =
+  typeof GetProjectionProjectByWorkspaceRootInput.Type;
 
 export const DeleteProjectionProjectInput = Schema.Struct({
   projectId: ProjectId,
@@ -50,6 +63,13 @@ export interface ProjectionProjectRepositoryShape {
    */
   readonly getById: (
     input: GetProjectionProjectInput,
+  ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>;
+
+  /**
+   * Read a projected project row by effective workspace root.
+   */
+  readonly getByWorkspaceRoot: (
+    input: GetProjectionProjectByWorkspaceRootInput,
   ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>;
 
   /**

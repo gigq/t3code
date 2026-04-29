@@ -17,6 +17,7 @@ import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
+import { ProjectionProjectRepositoryLive } from "./persistence/Layers/ProjectionProjects";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
 import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter";
 import { CopilotAdapterLive } from "./provider/Layers/CopilotAdapter";
@@ -50,6 +51,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
+import { RemoteWorkspacesLive } from "./workspace/Layers/RemoteWorkspaces";
 import { WebPushServiceLive } from "./notifications/Layers/WebPushService";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner";
 import { ObservabilityLive } from "./observability/Layers/Observability";
@@ -185,6 +187,9 @@ const ProviderLayerLive = Layer.unwrap(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+const RemoteWorkspaceLayerLive = RemoteWorkspacesLive.pipe(
+  Layer.provide(ProjectionProjectRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
+);
 
 const GitManagerLayerLive = GitManagerLive.pipe(
   Layer.provideMerge(ProjectSetupScriptRunnerLive),
@@ -218,6 +223,7 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(RemoteWorkspaceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(ServerSettingsLive),

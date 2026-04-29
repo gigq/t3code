@@ -6,6 +6,8 @@
  *
  * @module ClaudeAdapterLive
  */
+import { spawn } from "node:child_process";
+
 import {
   type CanUseTool,
   query,
@@ -17,6 +19,7 @@ import {
   type SDKResultMessage,
   type SettingSource,
   type SDKUserMessage,
+  type SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
@@ -64,6 +67,7 @@ import {
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { shellQuote } from "../../workspace/RemoteShell.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
 import {
   ProviderAdapterProcessError,
@@ -77,6 +81,8 @@ import { ClaudeAdapter, type ClaudeAdapterShape } from "../Services/ClaudeAdapte
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "claudeAgent" as const;
+const REMOTE_CLAUDE_PATH_SETUP =
+  'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"';
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -740,6 +746,41 @@ function tryParseJsonRecord(value: string): Record<string, unknown> | undefined 
   } catch {
     return undefined;
   }
+}
+
+function makeRemoteClaudeSpawn(input: {
+  readonly host: string;
+  readonly port?: number | undefined;
+  readonly remoteCwd: string;
+}): NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]> {
+  return (options) => {
+    const remoteCwd = options.cwd && options.cwd.trim().length > 0 ? options.cwd : input.remoteCwd;
+    const claudeArgs =
+      options.args[0]?.includes("@anthropic-ai/claude-agent-sdk") === true &&
+      options.args[0]?.endsWith("/cli.js") === true
+        ? options.args.slice(1)
+        : options.args;
+    const script = `${REMOTE_CLAUDE_PATH_SETUP}; cd ${shellQuote(remoteCwd)} && exec claude "$@"`;
+    const remoteCommand = [
+      "exec",
+      "/bin/sh",
+      "-lc",
+      shellQuote(script),
+      "--",
+      ...claudeArgs.map(shellQuote),
+    ].join(" ");
+    const sshArgs = [
+      "-T",
+      ...(input.port !== undefined ? ["-p", String(input.port)] : []),
+      input.host,
+      remoteCommand,
+    ];
+    return spawn("ssh", sshArgs, {
+      env: options.env as NodeJS.ProcessEnv,
+      signal: options.signal,
+      stdio: ["pipe", "pipe", "pipe"],
+    }) as SpawnedProcess;
+  };
 }
 
 function toolInputFingerprint(input: Record<string, unknown>): string | undefined {
@@ -2683,6 +2724,15 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const claudeBinaryPath = claudeSettings.binaryPath;
       const modelSelection =
         input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
+      const sshProjectLocation =
+        input.projectLocation?.kind === "ssh" ? input.projectLocation : undefined;
+      const spawnClaudeCodeProcess = sshProjectLocation
+        ? makeRemoteClaudeSpawn({
+            host: sshProjectLocation.host,
+            port: sshProjectLocation.port,
+            remoteCwd: sshProjectLocation.remotePath,
+          })
+        : undefined;
       const caps = getClaudeModelCapabilities(modelSelection?.model);
       const apiModelId = modelSelection ? resolveApiModelId(modelSelection) : undefined;
       const effort = (resolveEffort(caps, modelSelection?.options?.effort) ??
@@ -2702,7 +2752,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
-        pathToClaudeCodeExecutable: claudeBinaryPath,
+        ...(spawnClaudeCodeProcess
+          ? { spawnClaudeCodeProcess }
+          : { pathToClaudeCodeExecutable: claudeBinaryPath }),
         settingSources: [...CLAUDE_SETTING_SOURCES],
         ...(effectiveEffort
           ? { effort: effectiveEffort as NonNullable<ClaudeQueryOptions["effort"]> }

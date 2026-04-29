@@ -30,6 +30,12 @@ import {
 } from "../../observability/Metrics";
 import { runProcess } from "../../processRunner";
 import {
+  RemoteWorkspaces,
+  type RemoteWorkspaceError,
+  type ResolvedRemoteWorkspace,
+} from "../../workspace/Services/RemoteWorkspaces";
+import { buildRemoteShellCommand, buildSshArgs } from "../../workspace/RemoteShell";
+import {
   TerminalCwdError,
   TerminalHistoryError,
   TerminalManager,
@@ -664,6 +670,7 @@ const makeTerminalManager = Effect.fn("makeTerminalManager")(function* () {
 export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWithOptions")(
   function* (options: TerminalManagerOptions) {
     const fileSystem = yield* FileSystem.FileSystem;
+    const remoteWorkspacesOption = yield* Effect.serviceOption(RemoteWorkspaces);
     const services = yield* Effect.services();
     const runFork = Effect.runForkWith(services);
 
@@ -1019,7 +1026,28 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       );
     });
 
-    const assertValidCwd = Effect.fn("terminal.assertValidCwd")(function* (cwd: string) {
+    const resolveRemoteWorkspace = (
+      cwd: string,
+    ): Effect.Effect<Option.Option<ResolvedRemoteWorkspace>, RemoteWorkspaceError> =>
+      Option.isSome(remoteWorkspacesOption)
+        ? remoteWorkspacesOption.value.resolveWorkspaceRoot(cwd)
+        : Effect.succeed(Option.none());
+
+    const resolveTerminalCwd = Effect.fn("terminal.resolveTerminalCwd")(function* (cwd: string) {
+      const remoteWorkspace = yield* resolveRemoteWorkspace(cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TerminalCwdError({
+              cwd,
+              reason: "statFailed",
+              cause,
+            }),
+        ),
+      );
+      if (Option.isSome(remoteWorkspace)) {
+        return remoteWorkspace.value.remoteCwd;
+      }
+
       const stats = yield* fileSystem.stat(cwd).pipe(
         Effect.mapError(
           (cause) =>
@@ -1036,6 +1064,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           reason: "notDirectory",
         });
       }
+      return cwd;
     });
 
     const getSession = Effect.fn("terminal.getSession")(function* (
@@ -1243,6 +1272,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       shellCandidates: ReadonlyArray<ShellCandidate>,
       spawnEnv: NodeJS.ProcessEnv,
       session: TerminalSessionState,
+      spawnCwd: string,
       index = 0,
       lastError: PtySpawnError | null = null,
     ): Effect.fn.Return<{ process: PtyProcess; shellLabel: string }, PtySpawnError> {
@@ -1274,7 +1304,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         options.ptyAdapter.spawn({
           shell: candidate.shell,
           ...(candidate.args ? { args: candidate.args } : {}),
-          cwd: session.cwd,
+          cwd: spawnCwd,
           cols: session.cols,
           rows: session.rows,
           env: spawnEnv,
@@ -1293,7 +1323,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         return yield* spawnError;
       }
 
-      return yield* trySpawn(shellCandidates, spawnEnv, session, index + 1, spawnError);
+      return yield* trySpawn(shellCandidates, spawnEnv, session, spawnCwd, index + 1, spawnError);
     });
 
     const startSession = Effect.fn("terminal.startSession")(function* (
@@ -1327,14 +1357,43 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
       let ptyProcess: PtyProcess | null = null;
       let startedShell: string | null = null;
+      const remoteWorkspace = yield* resolveRemoteWorkspace(input.cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TerminalCwdError({
+              cwd: input.cwd,
+              reason: "statFailed",
+              cause,
+            }),
+        ),
+      );
+      const isRemoteTerminal = Option.isSome(remoteWorkspace);
+      const spawnCwd = isRemoteTerminal ? process.cwd() : input.cwd;
 
       const startResult = yield* Effect.result(
         increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
           Effect.andThen(
             Effect.gen(function* () {
-              const shellCandidates = resolveShellCandidates(shellResolver);
+              const shellCandidates = Option.match(remoteWorkspace, {
+                onNone: () => resolveShellCandidates(shellResolver),
+                onSome: (workspace): ReadonlyArray<ShellCandidate> => [
+                  {
+                    shell: "ssh",
+                    args: [
+                      ...buildSshArgs(
+                        workspace.location,
+                        buildRemoteShellCommand({
+                          cwd: workspace.remoteCwd,
+                          script: 'exec "${SHELL:-/bin/sh}" -l',
+                        }),
+                        { allocateTty: true },
+                      ),
+                    ],
+                  },
+                ],
+              });
               const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv);
-              const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
+              const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session, spawnCwd);
               ptyProcess = spawnResult.process;
               startedShell = spawnResult.shellLabel;
 
@@ -1568,7 +1627,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         input.threadId,
         Effect.gen(function* () {
           const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
-          yield* assertValidCwd(input.cwd);
+          const terminalCwd = yield* resolveTerminalCwd(input.cwd);
 
           const sessionKey = toSessionKey(input.threadId, terminalId);
           const existing = yield* getSession(input.threadId, terminalId);
@@ -1580,7 +1639,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             const session: TerminalSessionState = {
               threadId: input.threadId,
               terminalId,
-              cwd: input.cwd,
+              cwd: terminalCwd,
               worktreePath: input.worktreePath ?? null,
               status: "starting",
               pid: null,
@@ -1614,7 +1673,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               {
                 threadId: input.threadId,
                 terminalId,
-                cwd: input.cwd,
+                cwd: terminalCwd,
                 ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
                 cols,
                 rows,
@@ -1632,9 +1691,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const targetRows = input.rows ?? liveSession.rows;
           const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
 
-          if (liveSession.cwd !== input.cwd || runtimeEnvChanged) {
+          if (liveSession.cwd !== terminalCwd || runtimeEnvChanged) {
             yield* stopProcess(liveSession);
-            liveSession.cwd = input.cwd;
+            liveSession.cwd = terminalCwd;
             liveSession.worktreePath = input.worktreePath ?? null;
             liveSession.runtimeEnv = nextRuntimeEnv;
             liveSession.history = "";
@@ -1668,7 +1727,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               {
                 threadId: input.threadId,
                 terminalId,
-                cwd: input.cwd,
+                cwd: terminalCwd,
                 worktreePath: liveSession.worktreePath,
                 cols: targetCols,
                 rows: targetRows,
@@ -1748,7 +1807,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         Effect.gen(function* () {
           yield* increment(terminalRestartsTotal, { scope: "thread" });
           const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
-          yield* assertValidCwd(input.cwd);
+          const terminalCwd = yield* resolveTerminalCwd(input.cwd);
 
           const sessionKey = toSessionKey(input.threadId, terminalId);
           const existingSession = yield* getSession(input.threadId, terminalId);
@@ -1759,7 +1818,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             session = {
               threadId: input.threadId,
               terminalId,
-              cwd: input.cwd,
+              cwd: terminalCwd,
               worktreePath: input.worktreePath ?? null,
               status: "starting",
               pid: null,
@@ -1789,7 +1848,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           } else {
             session = existingSession.value;
             yield* stopProcess(session);
-            session.cwd = input.cwd;
+            session.cwd = terminalCwd;
             session.worktreePath = input.worktreePath ?? null;
             session.runtimeEnv = normalizedRuntimeEnv(input.env);
           }
@@ -1808,7 +1867,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             {
               threadId: input.threadId,
               terminalId,
-              cwd: input.cwd,
+              cwd: terminalCwd,
               ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
               cols,
               rows,

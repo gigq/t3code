@@ -48,6 +48,8 @@ import {
   OrchestrationGetThreadSnapshotInput,
   OrchestrationImportCodexThreadError,
   OrchestrationImportCodexThreadInput,
+  OrchestrationImportClaudeThreadError,
+  OrchestrationImportClaudeThreadInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsError,
@@ -92,6 +94,7 @@ import {
   ServerUpsertKeybindingResult,
 } from "./server";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
+import { ProviderRuntimeEvent, ProviderRuntimeEventSubscriptionInput } from "./providerRuntime";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -143,6 +146,7 @@ export const WS_METHODS = {
   // Streaming subscriptions
   subscribeGitStatus: "subscribeGitStatus",
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
+  subscribeProviderRuntimeEvents: "subscribeProviderRuntimeEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
@@ -382,6 +386,15 @@ export const WsOrchestrationImportCodexThreadRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationImportClaudeThreadRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.importClaudeThread,
+  {
+    payload: OrchestrationImportClaudeThreadInput,
+    success: OrchestrationRpcSchemas.importClaudeThread.output,
+    error: OrchestrationImportClaudeThreadError,
+  },
+);
+
 export const WsOrchestrationForkThreadRpc = Rpc.make(ORCHESTRATION_WS_METHODS.forkThread, {
   payload: OrchestrationForkThreadInput,
   success: OrchestrationRpcSchemas.forkThread.output,
@@ -414,6 +427,15 @@ export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
   {
     payload: Schema.Struct({}),
     success: OrchestrationEvent,
+    stream: true,
+  },
+);
+
+export const WsSubscribeProviderRuntimeEventsRpc = Rpc.make(
+  WS_METHODS.subscribeProviderRuntimeEvents,
+  {
+    payload: ProviderRuntimeEventSubscriptionInput,
+    success: ProviderRuntimeEvent,
     stream: true,
   },
 );
@@ -471,6 +493,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsNotificationsUpsertWebPushSubscriptionRpc,
   WsNotificationsRemoveWebPushSubscriptionRpc,
   WsSubscribeOrchestrationDomainEventsRpc,
+  WsSubscribeProviderRuntimeEventsRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
@@ -479,6 +502,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetThreadSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationImportCodexThreadRpc,
+  WsOrchestrationImportClaudeThreadRpc,
   WsOrchestrationForkThreadRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

@@ -26,6 +26,7 @@ function makeSnapshot(options?: {
         id: ProjectId.makeUnsafe("project-1"),
         title: "Polymaker",
         workspaceRoot: "/tmp/polymaker",
+        location: { kind: "local" },
         defaultModelSelection: null,
         scripts: [],
         createdAt: "2026-03-30T00:00:00.000Z",

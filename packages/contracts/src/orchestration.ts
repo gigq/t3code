@@ -13,6 +13,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ProviderItemId,
   ThreadId,
@@ -26,6 +27,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getThreadSnapshot: "orchestration.getThreadSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
   importCodexThread: "orchestration.importCodexThread",
+  importClaudeThread: "orchestration.importClaudeThread",
   forkThread: "orchestration.forkThread",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
@@ -165,10 +167,32 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+export const LocalProjectLocation = Schema.Struct({
+  kind: Schema.Literal("local"),
+});
+export type LocalProjectLocation = typeof LocalProjectLocation.Type;
+
+const SshPort = PositiveInt.check(Schema.isLessThanOrEqualTo(65535));
+export type SshPort = typeof SshPort.Type;
+
+export const SshProjectLocation = Schema.Struct({
+  kind: Schema.Literal("ssh"),
+  host: TrimmedNonEmptyString,
+  port: Schema.optionalKey(SshPort),
+  remotePath: TrimmedNonEmptyString,
+});
+export type SshProjectLocation = typeof SshProjectLocation.Type;
+
+export const ProjectLocation = Schema.Union([LocalProjectLocation, SshProjectLocation]);
+export type ProjectLocation = typeof ProjectLocation.Type;
+
+export const DEFAULT_PROJECT_LOCATION: ProjectLocation = { kind: "local" };
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  location: ProjectLocation.pipe(Schema.withDecodingDefault(() => DEFAULT_PROJECT_LOCATION)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
@@ -314,6 +338,7 @@ export const OrchestrationThread = Schema.Struct({
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
+  hasMoreMessagesBefore: Schema.optionalKey(Schema.Boolean),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
@@ -367,6 +392,13 @@ export type OrchestrationBootstrapReadModel = typeof OrchestrationBootstrapReadM
 export const OrchestrationThreadSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   thread: Schema.NullOr(OrchestrationThread),
+  messageWindow: Schema.optionalKey(
+    Schema.Struct({
+      beforeMessageId: Schema.NullOr(MessageId),
+      limit: PositiveInt,
+      hasMoreBefore: Schema.Boolean,
+    }),
+  ),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationThreadSnapshot = typeof OrchestrationThreadSnapshot.Type;
@@ -377,6 +409,7 @@ export const ProjectCreateCommand = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  location: ProjectLocation.pipe(Schema.withDecodingDefault(() => DEFAULT_PROJECT_LOCATION)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   createdAt: IsoDateTime,
 });
@@ -387,6 +420,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  location: Schema.optional(ProjectLocation),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
 });
@@ -792,6 +826,7 @@ export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  location: ProjectLocation.pipe(Schema.withDecodingDefault(() => DEFAULT_PROJECT_LOCATION)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
@@ -802,6 +837,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  location: Schema.optional(ProjectLocation),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
@@ -1213,6 +1249,8 @@ export type OrchestrationGetBootstrapSnapshotResult =
 
 export const OrchestrationGetThreadSnapshotInput = Schema.Struct({
   threadId: ThreadId,
+  beforeMessageId: Schema.optional(MessageId),
+  messageLimit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(500))),
 });
 export type OrchestrationGetThreadSnapshotInput = typeof OrchestrationGetThreadSnapshotInput.Type;
 const OrchestrationGetThreadSnapshotResult = OrchestrationThreadSnapshot;
@@ -1256,8 +1294,29 @@ export const OrchestrationImportCodexThreadResult = Schema.Struct({
 });
 export type OrchestrationImportCodexThreadResult = typeof OrchestrationImportCodexThreadResult.Type;
 
+export const OrchestrationImportClaudeThreadInput = Schema.Struct({
+  projectId: ProjectId,
+  providerThreadId: TrimmedNonEmptyString,
+  title: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationImportClaudeThreadInput = typeof OrchestrationImportClaudeThreadInput.Type;
+
+export const OrchestrationImportClaudeThreadResult = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationImportClaudeThreadResult =
+  typeof OrchestrationImportClaudeThreadResult.Type;
+
 export class OrchestrationImportCodexThreadError extends Schema.TaggedErrorClass<OrchestrationImportCodexThreadError>()(
   "OrchestrationImportCodexThreadError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationImportClaudeThreadError extends Schema.TaggedErrorClass<OrchestrationImportClaudeThreadError>()(
+  "OrchestrationImportClaudeThreadError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),
@@ -1307,6 +1366,10 @@ export const OrchestrationRpcSchemas = {
   importCodexThread: {
     input: OrchestrationImportCodexThreadInput,
     output: OrchestrationImportCodexThreadResult,
+  },
+  importClaudeThread: {
+    input: OrchestrationImportClaudeThreadInput,
+    output: OrchestrationImportClaudeThreadResult,
   },
   forkThread: {
     input: OrchestrationForkThreadInput,

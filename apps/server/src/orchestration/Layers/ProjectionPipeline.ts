@@ -382,6 +382,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             projectId: event.payload.projectId,
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
+            location: event.payload.location,
             defaultModelSelection: event.payload.defaultModelSelection,
             scripts: event.payload.scripts,
             createdAt: event.payload.createdAt,
@@ -403,6 +404,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.workspaceRoot !== undefined
               ? { workspaceRoot: event.payload.workspaceRoot }
               : {}),
+            ...(event.payload.location !== undefined ? { location: event.payload.location } : {}),
             ...(event.payload.defaultModelSelection !== undefined
               ? { defaultModelSelection: event.payload.defaultModelSelection }
               : {}),

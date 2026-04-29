@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, GitForkIcon, TerminalSquareIcon } from "lucide-react";
+import { BugIcon, DiffIcon, GitForkIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -22,6 +22,7 @@ interface ChatHeaderProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalAvailable: boolean;
   terminalOpen: boolean;
+  debugOpen: boolean;
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
@@ -32,6 +33,7 @@ interface ChatHeaderProps {
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
+  onToggleDebug: () => void;
   onToggleDiff: () => void;
   onForkThread?: () => void;
 }
@@ -46,6 +48,7 @@ export const ChatHeader = memo(function ChatHeader({
   keybindings,
   terminalAvailable,
   terminalOpen,
+  debugOpen,
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
   gitCwd,
@@ -56,6 +59,7 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
   onToggleTerminal,
+  onToggleDebug,
   onToggleDiff,
   onForkThread,
 }: ChatHeaderProps) {
@@ -134,6 +138,28 @@ export const ChatHeader = memo(function ChatHeader({
               : terminalToggleShortcutLabel
                 ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
                 : "Toggle terminal drawer"}
+          </TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={debugOpen}
+                onPressedChange={onToggleDebug}
+                aria-label="Toggle provider debug drawer"
+                variant="outline"
+                size="xs"
+                disabled={!terminalAvailable}
+              >
+                <BugIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {!terminalAvailable
+              ? "Provider debug is unavailable until this thread has an active project."
+              : "Toggle provider debug drawer"}
           </TooltipPopup>
         </Tooltip>
         <Tooltip>

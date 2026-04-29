@@ -34,7 +34,35 @@ export function useImportCodexThread() {
     [navigate],
   );
 
+  const importClaudeThread = useCallback(
+    async (input: {
+      readonly projectId: ProjectId;
+      readonly providerThreadId: string;
+      readonly title?: string;
+    }) => {
+      const api = readNativeApi();
+      if (!api) {
+        throw new Error("Native API is unavailable.");
+      }
+
+      const result = await api.orchestration.importClaudeThread({
+        projectId: input.projectId,
+        providerThreadId: input.providerThreadId,
+        ...(input.title ? { title: input.title } : {}),
+      });
+
+      await navigate({
+        to: "/$threadId",
+        params: { threadId: result.threadId },
+      });
+
+      return result.threadId;
+    },
+    [navigate],
+  );
+
   return {
     importCodexThread,
+    importClaudeThread,
   };
 }

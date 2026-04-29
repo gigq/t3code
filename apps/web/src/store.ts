@@ -396,6 +396,7 @@ function mapThread(thread: OrchestrationThread): Thread {
     autoDeferUntil: thread.autoDeferUntil,
     session: normalizedSession,
     messages,
+    hasMoreMessagesBefore: thread.hasMoreMessagesBefore ?? false,
     proposedPlans,
     error: sanitizeThreadErrorMessage(normalizedSession?.lastError),
     createdAt: thread.createdAt,
@@ -412,13 +413,24 @@ function mapThread(thread: OrchestrationThread): Thread {
   };
 }
 
-function mergeThreadSnapshot(existing: Thread, snapshotThread: Thread): Thread {
+function mergeThreadSnapshot(
+  existing: Thread,
+  snapshotThread: Thread,
+  options: { partialMessagePage: boolean },
+): Thread {
   const snapshotIsStale =
     existing.updatedAt !== undefined &&
     snapshotThread.updatedAt !== undefined &&
     existing.updatedAt > snapshotThread.updatedAt;
+  const snapshotMessageIds = new Set(snapshotThread.messages.map((message) => message.id));
+  const existingHasMessagesOutsideSnapshot = existing.messages.some(
+    (message) => !snapshotMessageIds.has(message.id),
+  );
+  const shouldPreserveExistingMessages =
+    options.partialMessagePage ||
+    (snapshotThread.hasMoreMessagesBefore === true && existingHasMessagesOutsideSnapshot);
 
-  if (!snapshotIsStale) {
+  if (!snapshotIsStale && !shouldPreserveExistingMessages) {
     return snapshotThread;
   }
 
@@ -455,6 +467,7 @@ function mergeThreadSnapshot(existing: Thread, snapshotThread: Thread): Thread {
     autoDeferUntil: existing.autoDeferUntil,
     session,
     messages,
+    hasMoreMessagesBefore: snapshotThread.hasMoreMessagesBefore ?? false,
     proposedPlans,
     error: existing.error,
     archivedAt: existing.archivedAt,
@@ -489,6 +502,7 @@ function mapThreadSummary(thread: OrchestrationThreadSummary): Thread {
     autoDeferUntil: thread.autoDeferUntil,
     session,
     messages: [],
+    hasMoreMessagesBefore: false,
     proposedPlans: [],
     error: sanitizeThreadErrorMessage(session?.lastError),
     createdAt: thread.createdAt,
@@ -557,6 +571,7 @@ function mapProject(project: OrchestrationReadModel["projects"][number]): Projec
     id: project.id,
     name: project.title,
     cwd: project.workspaceRoot,
+    location: project.location,
     defaultModelSelection: project.defaultModelSelection
       ? normalizeModelSelection(project.defaultModelSelection)
       : null,
@@ -1023,7 +1038,11 @@ export function syncThreadSnapshot(
   }
   const nextThread = mapThread(snapshot.thread);
   const existing = state.threads.find((thread) => thread.id === nextThread.id);
-  const mergedThread = existing ? mergeThreadSnapshot(existing, nextThread) : nextThread;
+  const mergedThread = existing
+    ? mergeThreadSnapshot(existing, nextThread, {
+        partialMessagePage: snapshot.messageWindow?.beforeMessageId != null,
+      })
+    : nextThread;
   const threads = existing
     ? state.threads.map((thread) => (thread.id === mergedThread.id ? mergedThread : thread))
     : [...state.threads, mergedThread];
@@ -1061,6 +1080,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           id: event.payload.projectId,
           title: event.payload.title,
           workspaceRoot: event.payload.workspaceRoot,
+          location: event.payload.location,
           defaultModelSelection: event.payload.defaultModelSelection,
           scripts: event.payload.scripts,
           createdAt: event.payload.createdAt,
@@ -1083,6 +1103,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           ...(event.payload.workspaceRoot !== undefined
             ? { cwd: event.payload.workspaceRoot }
             : {}),
+          ...(event.payload.location !== undefined ? { location: event.payload.location } : {}),
           ...(event.payload.defaultModelSelection !== undefined
             ? {
                 defaultModelSelection: event.payload.defaultModelSelection
@@ -1122,6 +1143,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           archivedAt: null,
           deletedAt: null,
           messages: [],
+          hasMoreMessagesBefore: false,
           proposedPlans: [],
           activities: [],
           checkpoints: [],

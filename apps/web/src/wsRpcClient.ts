@@ -6,6 +6,7 @@ import {
   type GitStatusStreamEvent,
   type NativeApi,
   ORCHESTRATION_WS_METHODS,
+  type ProviderRuntimeEventSubscriptionInput,
   type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -119,11 +120,17 @@ export interface WsRpcClient {
     readonly getThreadSnapshot: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getThreadSnapshot>;
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly importCodexThread: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.importCodexThread>;
+    readonly importClaudeThread: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.importClaudeThread>;
     readonly forkThread: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.forkThread>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
     readonly onDomainEvent: RpcStreamMethod<typeof WS_METHODS.subscribeOrchestrationDomainEvents>;
+    readonly onProviderRuntimeEvent: (
+      input: ProviderRuntimeEventSubscriptionInput,
+      listener: Parameters<NativeApi["orchestration"]["onProviderRuntimeEvent"]>[1],
+      options?: StreamSubscriptionOptions,
+    ) => () => void;
   };
 }
 
@@ -273,6 +280,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
       importCodexThread: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.importCodexThread](input)),
+      importClaudeThread: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.importClaudeThread](input)),
       forkThread: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.forkThread](input)),
       getTurnDiff: (input) =>
@@ -286,6 +295,12 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       onDomainEvent: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeOrchestrationDomainEvents]({}),
+          listener,
+          options,
+        ),
+      onProviderRuntimeEvent: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeProviderRuntimeEvents](input),
           listener,
           options,
         ),

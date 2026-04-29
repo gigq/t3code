@@ -11,6 +11,7 @@ import {
 import {
   ChatAttachment,
   ModelSelection,
+  ProjectLocation,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderApprovalDecision,
@@ -50,6 +51,7 @@ export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
   provider: Schema.optional(ProviderKind),
   cwd: Schema.optional(TrimmedNonEmptyString),
+  projectLocation: Schema.optional(ProjectLocation),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
