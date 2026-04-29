@@ -26,6 +26,7 @@ import {
 import { buildReconnectCheckInPrompt } from "@t3tools/shared/reconnectCheckIn";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { providerWorkspaceRootForProject } from "../../workspace/Services/RemoteWorkspaces.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError, ProviderServiceError } from "../../provider/Errors.ts";
@@ -403,6 +404,15 @@ const make = Effect.gen(function* () {
       thread,
       projects: readModel.projects,
     });
+    const project = readModel.projects.find((entry) => entry.id === thread.projectId);
+    const providerCwd =
+      thread.worktreePath ??
+      (project
+        ? providerWorkspaceRootForProject({
+            workspaceRoot: project.workspaceRoot,
+            location: project.location,
+          })
+        : effectiveCwd);
 
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
@@ -416,7 +426,8 @@ const make = Effect.gen(function* () {
       providerService.startSession(threadId, {
         threadId,
         ...(preferredProvider ? { provider: preferredProvider } : {}),
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+        ...(providerCwd ? { cwd: providerCwd } : {}),
+        ...(project ? { projectLocation: project.location } : {}),
         modelSelection: desiredModelSelection,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: desiredRuntimeMode,
@@ -443,6 +454,20 @@ const make = Effect.gen(function* () {
         requestedModelSelection !== undefined &&
         requestedModelSelection.provider !== currentProvider;
       const activeSession = yield* resolveActiveSession(existingSessionThreadId);
+      if (!activeSession) {
+        yield* Effect.logWarning(
+          "provider command reactor found thread session state without an active provider binding",
+          {
+            threadId,
+            existingSessionThreadId,
+            sessionStatus: thread.session?.status,
+            currentProvider,
+          },
+        );
+        const restartedSession = yield* startProviderSession(undefined);
+        yield* bindSessionToThread(restartedSession);
+        return restartedSession.threadId;
+      }
       const sessionModelSwitch =
         currentProvider === undefined
           ? "in-session"

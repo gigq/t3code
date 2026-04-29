@@ -269,6 +269,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             projectId: "project-1",
             title: "Project",
             workspaceRoot: "/tmp/project",
+            location: { kind: "local" },
             defaultModelSelection: {
               provider: "claudeAgent",
               model: "claude-opus-4-6",
@@ -285,6 +286,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             projectId: "project-2",
             title: "Fallback Project",
             workspaceRoot: "/tmp/project-2",
+            location: { kind: "local" },
             defaultModelSelection: {
               provider: "claudeAgent",
               model: "claude-opus-4-6",
@@ -301,6 +303,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             projectId: "project-3",
             title: "Null Model Project",
             workspaceRoot: "/tmp/project-3",
+            location: { kind: "local" },
             defaultModelSelection: null,
             scripts: [],
             createdAt: "2026-01-01T00:00:00.000Z",

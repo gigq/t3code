@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
 
 import {
@@ -472,6 +475,68 @@ describe("startSession", () => {
       ]);
     } finally {
       versionCheck.mockRestore();
+      manager.stopAll();
+    }
+  });
+
+  it("fails fast with stderr when codex exits before initialize responds", async () => {
+    const manager = new CodexAppServerManager();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const fakeChild = Object.assign(new EventEmitter(), {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn(() => true),
+    }) as unknown as ChildProcessWithoutNullStreams;
+
+    const startChild = vi
+      .spyOn(
+        manager as unknown as {
+          startCodexAppServerChild: () => ChildProcessWithoutNullStreams;
+        },
+        "startCodexAppServerChild",
+      )
+      .mockReturnValue(fakeChild);
+
+    const events: Array<{ method: string; kind: string; message?: string }> = [];
+    manager.on("event", (event) => {
+      events.push({
+        method: event.method,
+        kind: event.kind,
+        ...(event.message ? { message: event.message } : {}),
+      });
+    });
+
+    try {
+      const startedAt = Date.now();
+      const startSession = manager.startSession({
+        threadId: asThreadId("thread-exits-before-initialize"),
+        provider: "codex",
+        binaryPath: "codex",
+        runtimeMode: "full-access",
+      });
+
+      stderr.write("remote codex missing dependency\n");
+      fakeChild.emit("exit", 127, null);
+
+      await expect(startSession).rejects.toThrow("remote codex missing dependency");
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      expect(events).toContainEqual({
+        method: "process/stderr",
+        kind: "notification",
+        message: "remote codex missing dependency",
+      });
+      expect(events).toContainEqual({
+        method: "session/startFailed",
+        kind: "error",
+        message:
+          "codex app-server exited (code=127, signal=null). Recent stderr:\nremote codex missing dependency",
+      });
+    } finally {
+      startChild.mockRestore();
       manager.stopAll();
     }
   });

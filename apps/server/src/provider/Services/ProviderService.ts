@@ -43,6 +43,17 @@ export interface ProviderServiceShape {
   ) => Effect.Effect<ProviderSession, ProviderServiceError>;
 
   /**
+   * Persist a provider binding for a thread without launching the provider runtime.
+   *
+   * This is used by import/resume workflows where the first real provider process
+   * should be started lazily on the next turn.
+   */
+  readonly bindSession: (
+    threadId: ThreadId,
+    input: ProviderSessionStartInput,
+  ) => Effect.Effect<ProviderSession, ProviderServiceError>;
+
+  /**
    * Send a provider turn.
    */
   readonly sendTurn: (
@@ -105,6 +116,13 @@ export interface ProviderServiceShape {
     readonly threadId: ThreadId;
     readonly numTurns: number;
   }) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Read recent canonical provider runtime events buffered for one thread.
+   */
+  readonly readThreadRuntimeEvents: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ProviderRuntimeEvent>>;
 
   /**
    * Canonical provider runtime event stream.

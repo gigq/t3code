@@ -1,12 +1,14 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import readline from "node:readline";
 
 import {
   ApprovalRequestId,
   EventId,
   ProviderItemId,
+  type ProjectLocation,
   ProviderRequestKind,
   type ProviderUserInputAnswers,
   ThreadId,
@@ -32,6 +34,7 @@ import {
   type CodexAccountSnapshot,
 } from "./provider/codexAccount";
 import { buildCodexInitializeParams, killCodexChildProcess } from "./provider/codexAppServer";
+import { shellQuote } from "./workspace/RemoteShell";
 
 export { buildCodexInitializeParams } from "./provider/codexAppServer";
 export { readCodexAccountSnapshot, resolveCodexModelForAccount } from "./provider/codexAccount";
@@ -75,6 +78,7 @@ interface CodexSessionContext {
   account: CodexAccountSnapshot;
   child: ChildProcessWithoutNullStreams;
   output: readline.Interface;
+  stderrTail: string[];
   pending: Map<PendingRequestKey, PendingRequest>;
   pendingApprovals: Map<ApprovalRequestId, PendingApprovalRequest>;
   pendingUserInputs: Map<ApprovalRequestId, PendingUserInputRequest>;
@@ -105,6 +109,14 @@ interface JsonRpcNotification {
   params?: unknown;
 }
 
+function resolveRemoteCodexBinary(binaryPath: string): string {
+  const normalized = binaryPath.replaceAll("\\", "/").trim();
+  if (!normalized.includes("/")) {
+    return normalized;
+  }
+  return path.posix.basename(normalized);
+}
+
 export interface CodexAppServerSendTurnInput {
   readonly threadId: ThreadId;
   readonly input?: string;
@@ -119,6 +131,7 @@ export interface CodexAppServerStartSessionInput {
   readonly threadId: ThreadId;
   readonly provider?: "codex";
   readonly cwd?: string;
+  readonly projectLocation?: ProjectLocation;
   readonly model?: string;
   readonly serviceTier?: string;
   readonly resumeCursor?: unknown;
@@ -147,6 +160,7 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db missing rollout path for thread",
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
+const CODEX_STDERR_TAIL_LIMIT = 20;
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
   "missing thread",
@@ -447,6 +461,20 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
   return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
 }
 
+function formatCodexProcessExitMessage(
+  context: Pick<CodexSessionContext, "stderrTail">,
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): string {
+  const base = `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`;
+  const stderr = context.stderrTail.slice(-3).join("\n").trim();
+  if (!stderr) {
+    return base;
+  }
+
+  return `${base} Recent stderr:\n${stderr}`;
+}
+
 export interface CodexAppServerManagerEvents {
   event: [event: ProviderEvent];
 }
@@ -458,6 +486,50 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   constructor(services?: ServiceMap.ServiceMap<never>) {
     super();
     this.runPromise = services ? Effect.runPromiseWith(services) : Effect.runPromise;
+  }
+
+  private startCodexAppServerChild(input: {
+    readonly binaryPath: string;
+    readonly cwd: string;
+    readonly projectLocation?: ProjectLocation;
+    readonly homePath?: string;
+  }): ChildProcessWithoutNullStreams {
+    if (input.projectLocation?.kind === "ssh") {
+      // SSH-backed projects must resolve Codex on the remote host, not via the
+      // local machine's absolute binary or CODEX_HOME settings.
+      const remoteBinary = resolveRemoteCodexBinary(input.binaryPath);
+      const remoteCommand = `exec /bin/sh -lc ${shellQuote(
+        `export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"; exec ${shellQuote(remoteBinary)} app-server`,
+      )}`;
+      const sshArgs = [
+        "-T",
+        ...(input.projectLocation.port !== undefined
+          ? ["-p", String(input.projectLocation.port)]
+          : []),
+        input.projectLocation.host,
+        remoteCommand,
+      ];
+      return spawn("ssh", sshArgs, {
+        env: process.env,
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: process.platform === "win32",
+      });
+    }
+
+    this.assertSupportedCodexCliVersion({
+      binaryPath: input.binaryPath,
+      cwd: input.cwd,
+      ...(input.homePath ? { homePath: input.homePath } : {}),
+    });
+    return spawn(input.binaryPath, ["app-server"], {
+      cwd: input.cwd,
+      env: {
+        ...process.env,
+        ...(input.homePath ? { CODEX_HOME: input.homePath } : {}),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: process.platform === "win32",
+    });
   }
 
   async startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
@@ -481,19 +553,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       const codexBinaryPath = input.binaryPath;
       const codexHomePath = input.homePath;
-      this.assertSupportedCodexCliVersion({
+      const child = this.startCodexAppServerChild({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
+        ...(input.projectLocation ? { projectLocation: input.projectLocation } : {}),
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
-      });
-      const child = spawn(codexBinaryPath, ["app-server"], {
-        cwd: resolvedCwd,
-        env: {
-          ...process.env,
-          ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
-        },
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: process.platform === "win32",
       });
       const output = readline.createInterface({ input: child.stdout });
 
@@ -506,6 +570,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         },
         child,
         output,
+        stderrTail: [],
         pending: new Map(),
         pendingApprovals: new Map(),
         pendingUserInputs: new Map(),
@@ -984,12 +1049,17 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           continue;
         }
 
+        context.stderrTail.push(classified.message);
+        if (context.stderrTail.length > CODEX_STDERR_TAIL_LIMIT) {
+          context.stderrTail.splice(0, context.stderrTail.length - CODEX_STDERR_TAIL_LIMIT);
+        }
         this.emitNotificationEvent(context, "process/stderr", classified.message);
       }
     });
 
     context.child.on("error", (error) => {
       const message = error.message || "codex app-server process errored.";
+      this.rejectPendingRequests(context, new Error(message));
       this.updateSession(context, {
         status: "error",
         lastError: message,
@@ -1002,7 +1072,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         return;
       }
 
-      const message = `codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`;
+      const message = formatCodexProcessExitMessage(context, code, signal);
+      this.rejectPendingRequests(context, new Error(message));
       this.updateSession(context, {
         status: "closed",
         activeTurnId: undefined,
@@ -1011,6 +1082,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       this.emitLifecycleEvent(context, "session/exited", message);
       this.sessions.delete(context.session.threadId);
     });
+  }
+
+  private rejectPendingRequests(context: CodexSessionContext, error: Error): void {
+    const pendingRequests = Array.from(context.pending.values());
+    context.pending.clear();
+    for (const pending of pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
   }
 
   private handleStdoutLine(context: CodexSessionContext, line: string): void {

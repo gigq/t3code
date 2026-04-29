@@ -86,6 +86,7 @@ const rpcClientMock = {
     getSnapshot: vi.fn(),
     dispatchCommand: vi.fn(),
     importCodexThread: vi.fn(),
+    importClaudeThread: vi.fn(),
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
     replayEvents: vi.fn(),
@@ -256,6 +257,7 @@ describe("wsNativeApi", () => {
         projectId: ProjectId.makeUnsafe("project-1"),
         title: "Project",
         workspaceRoot: "/tmp/workspace",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -322,6 +324,7 @@ describe("wsNativeApi", () => {
       projectId: ProjectId.makeUnsafe("project-1"),
       title: "Project",
       workspaceRoot: "/tmp/project",
+      location: { kind: "local" },
       defaultModelSelection: {
         provider: "codex",
         model: "gpt-5-codex",

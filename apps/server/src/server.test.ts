@@ -12,6 +12,7 @@ import {
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
+  type OrchestrationReadModel,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ResolvedKeybindingRule,
@@ -99,7 +100,7 @@ const defaultModelSelection = {
   model: "gpt-5-codex",
 } as const;
 
-const makeDefaultOrchestrationReadModel = () => {
+const makeDefaultOrchestrationReadModel = (): OrchestrationReadModel => {
   const now = new Date().toISOString();
   return {
     snapshotSequence: 0,
@@ -109,6 +110,7 @@ const makeDefaultOrchestrationReadModel = () => {
         id: defaultProjectId,
         title: "Default Project",
         workspaceRoot: "/tmp/default-project",
+        location: { kind: "local" },
         defaultModelSelection,
         scripts: [],
         createdAt: now,
@@ -1917,7 +1919,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("routes websocket rpc orchestration methods", () =>
     Effect.gen(function* () {
       const now = new Date().toISOString();
-      const snapshot = {
+      const snapshot: OrchestrationReadModel = {
         snapshotSequence: 1,
         updatedAt: now,
         projects: [
@@ -1925,6 +1927,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             id: ProjectId.makeUnsafe("project-a"),
             title: "Project A",
             workspaceRoot: "/tmp/project-a",
+            location: { kind: "local" },
             defaultModelSelection,
             scripts: [],
             createdAt: now,

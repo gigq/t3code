@@ -997,6 +997,12 @@ export type ProviderRuntimeEventV2 = typeof ProviderRuntimeEventV2.Type;
 export const ProviderRuntimeEvent = ProviderRuntimeEventV2;
 export type ProviderRuntimeEvent = ProviderRuntimeEventV2;
 
+export const ProviderRuntimeEventSubscriptionInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type ProviderRuntimeEventSubscriptionInput =
+  typeof ProviderRuntimeEventSubscriptionInput.Type;
+
 // Compatibility aliases for call sites still importing legacy names.
 const ProviderRuntimeMessageDeltaEvent = ProviderRuntimeContentDeltaEvent;
 export type ProviderRuntimeMessageDeltaEvent = ProviderRuntimeContentDeltaEvent;

@@ -181,6 +181,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
           projectId: nextProjectId,
           title: bootstrapProjectTitle,
           workspaceRoot: serverConfig.cwd,
+          location: { kind: "local" },
           defaultModelSelection: nextProjectDefaultModelSelection,
           createdAt,
         });

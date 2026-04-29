@@ -85,6 +85,7 @@ it.effect("trims branded ids and command string fields at decode boundaries", ()
       projectId: " project-1 ",
       title: " Project Title ",
       workspaceRoot: " /tmp/workspace ",
+      location: { kind: "local" },
       defaultModelSelection: {
         provider: "codex",
         model: " gpt-5.2 ",
@@ -108,6 +109,7 @@ it.effect("decodes historical project.created payloads with a default provider",
       projectId: "project-1",
       title: "Project Title",
       workspaceRoot: "/tmp/workspace",
+      location: { kind: "local" },
       defaultModelSelection: {
         provider: "codex",
         model: "gpt-5.4",

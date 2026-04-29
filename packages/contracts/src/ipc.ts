@@ -58,14 +58,18 @@ import type {
   OrchestrationBootstrapReadModel,
   OrchestrationForkThreadInput,
   OrchestrationForkThreadResult,
+  OrchestrationGetThreadSnapshotInput,
   OrchestrationImportCodexThreadInput,
   OrchestrationImportCodexThreadResult,
+  OrchestrationImportClaudeThreadInput,
+  OrchestrationImportClaudeThreadResult,
   OrchestrationThreadSnapshot,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "./orchestration";
+import type { ProviderRuntimeEvent } from "./providerRuntime";
 import { EditorId } from "./editor";
 import { ServerSettings, ServerSettingsPatch } from "./settings";
 
@@ -213,11 +217,16 @@ export interface NativeApi {
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
     getBootstrapSnapshot: () => Promise<OrchestrationBootstrapReadModel>;
-    getThreadSnapshot: (threadId: ThreadId) => Promise<OrchestrationThreadSnapshot>;
+    getThreadSnapshot: (
+      input: ThreadId | OrchestrationGetThreadSnapshotInput,
+    ) => Promise<OrchestrationThreadSnapshot>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     importCodexThread: (
       input: OrchestrationImportCodexThreadInput,
     ) => Promise<OrchestrationImportCodexThreadResult>;
+    importClaudeThread: (
+      input: OrchestrationImportClaudeThreadInput,
+    ) => Promise<OrchestrationImportClaudeThreadResult>;
     forkThread: (input: OrchestrationForkThreadInput) => Promise<OrchestrationForkThreadResult>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
@@ -226,6 +235,13 @@ export interface NativeApi {
     replayEvents: (fromSequenceExclusive: number) => Promise<OrchestrationEvent[]>;
     onDomainEvent: (
       callback: (event: OrchestrationEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+    onProviderRuntimeEvent: (
+      threadId: ThreadId,
+      callback: (event: ProviderRuntimeEvent) => void,
       options?: {
         onResubscribe?: () => void;
       },

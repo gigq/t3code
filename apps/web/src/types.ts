@@ -1,6 +1,7 @@
 import type {
   ModelSelection,
   OrchestrationLatestTurn,
+  ProjectLocation,
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
@@ -20,6 +21,7 @@ export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 
 export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280;
+export const DEFAULT_THREAD_DEBUG_HEIGHT = 280;
 export const DEFAULT_THREAD_TERMINAL_ID = "default";
 export const MAX_TERMINALS_PER_GROUP = 4;
 export type ProjectScript = ContractProjectScript;
@@ -83,6 +85,7 @@ export interface Project {
   id: ProjectId;
   name: string;
   cwd: string;
+  location: ProjectLocation;
   defaultModelSelection: ModelSelection | null;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
@@ -100,6 +103,7 @@ export interface Thread {
   autoDeferUntil: string | null;
   session: ThreadSession | null;
   messages: ChatMessage[];
+  hasMoreMessagesBefore?: boolean;
   proposedPlans: ProposedPlan[];
   error: string | null;
   createdAt: string;

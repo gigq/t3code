@@ -7,6 +7,7 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  MessageId,
   OrchestrationBootstrapReadModel,
   OrchestrationCheckpointSummary,
   OrchestrationProject,
@@ -34,6 +35,11 @@ export interface ProjectionThreadCheckpointContext {
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
 }
 
+export interface ProjectionThreadSnapshotOptions {
+  readonly beforeMessageId?: MessageId | undefined;
+  readonly messageLimit?: number | undefined;
+}
+
 /**
  * ProjectionSnapshotQueryShape - Service API for read-model snapshots.
  */
@@ -55,10 +61,14 @@ export interface ProjectionSnapshotQueryShape {
   >;
 
   /**
-   * Read the full detail payload for a single thread.
+   * Read the detail payload for a single thread.
+   *
+   * Message history is windowed by default. Pass beforeMessageId to page older
+   * messages.
    */
   readonly getThreadSnapshot: (
     threadId: ThreadId,
+    options?: ProjectionThreadSnapshotOptions,
   ) => Effect.Effect<OrchestrationThreadSnapshot, ProjectionRepositoryError>;
 
   /**

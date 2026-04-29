@@ -41,6 +41,7 @@ import {
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
+import { useThreadDebugStateStore } from "../threadDebugStateStore";
 import { migrateLocalSettingsToServer } from "../hooks/useSettings";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
@@ -237,6 +238,9 @@ function EventRouter() {
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
   );
+  const removeOrphanedDebugStates = useThreadDebugStateStore(
+    (store) => store.removeOrphanedDebugStates,
+  );
   const applyTerminalEvent = useTerminalStateStore((store) => store.applyTerminalEvent);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -393,6 +397,7 @@ function EventRouter() {
         draftThreadIds,
       });
       removeOrphanedTerminalStates(activeThreadIds);
+      removeOrphanedDebugStates(activeThreadIds);
     };
 
     const queryInvalidationThrottler = new Throttler(
@@ -687,6 +692,7 @@ function EventRouter() {
     queryClient,
     removeTerminalState,
     removeOrphanedTerminalStates,
+    removeOrphanedDebugStates,
     applyTerminalEvent,
     clearThreadUi,
     setProjectExpanded,

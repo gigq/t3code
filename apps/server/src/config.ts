@@ -31,6 +31,7 @@ export interface ServerDerivedPaths {
   readonly worktreesDir: string;
   readonly attachmentsDir: string;
   readonly logsDir: string;
+  readonly remoteWorkspacesDir: string;
   readonly serverLogPath: string;
   readonly serverTracePath: string;
   readonly providerLogsDir: string;
@@ -77,6 +78,7 @@ export const deriveServerPaths = Effect.fn(function* (
   const dbPath = join(stateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
   const logsDir = join(stateDir, "logs");
+  const remoteWorkspacesDir = join(stateDir, "remote-workspaces");
   const providerLogsDir = join(logsDir, "provider");
   return {
     stateDir,
@@ -87,6 +89,7 @@ export const deriveServerPaths = Effect.fn(function* (
     worktreesDir: join(baseDir, "worktrees"),
     attachmentsDir,
     logsDir,
+    remoteWorkspacesDir,
     serverLogPath: join(logsDir, "server.log"),
     serverTracePath: join(logsDir, "server.trace.ndjson"),
     providerLogsDir,
@@ -104,6 +107,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
     [
       fs.makeDirectory(derivedPaths.stateDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.logsDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.remoteWorkspacesDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.providerLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.terminalLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),

@@ -215,6 +215,23 @@ export const ServerCodexUsageWindow = Schema.Struct({
 });
 export type ServerCodexUsageWindow = typeof ServerCodexUsageWindow.Type;
 
+export const ServerProviderUsage = Schema.Struct({
+  available: Schema.Boolean,
+  provider: TrimmedNonEmptyString,
+  accountEmail: Schema.NullOr(TrimmedNonEmptyString),
+  loginMethod: Schema.NullOr(TrimmedNonEmptyString),
+  source: Schema.NullOr(TrimmedNonEmptyString),
+  version: Schema.NullOr(TrimmedNonEmptyString),
+  primary: Schema.NullOr(ServerCodexUsageWindow),
+  secondary: Schema.NullOr(ServerCodexUsageWindow),
+  sparkPrimary: Schema.NullOr(ServerCodexUsageWindow),
+  sparkSecondary: Schema.NullOr(ServerCodexUsageWindow),
+  creditsRemaining: Schema.NullOr(Schema.Number),
+  updatedAt: Schema.NullOr(IsoDateTime),
+  error: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerProviderUsage = typeof ServerProviderUsage.Type;
+
 export const ServerCodexUsage = Schema.Struct({
   available: Schema.Boolean,
   provider: TrimmedNonEmptyString,
@@ -229,5 +246,6 @@ export const ServerCodexUsage = Schema.Struct({
   creditsRemaining: Schema.NullOr(Schema.Number),
   updatedAt: Schema.NullOr(IsoDateTime),
   error: Schema.NullOr(TrimmedNonEmptyString),
+  additionalProviders: Schema.optionalKey(Schema.Array(ServerProviderUsage)),
 });
 export type ServerCodexUsage = typeof ServerCodexUsage.Type;

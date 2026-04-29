@@ -2,10 +2,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Schema, Struct } from "effect";
 
-import { ModelSelection, ProjectScript } from "@t3tools/contracts";
+import { ModelSelection, ProjectLocation, ProjectScript } from "@t3tools/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   DeleteProjectionProjectInput,
+  GetProjectionProjectByWorkspaceRootInput,
   GetProjectionProjectInput,
   ProjectionProject,
   ProjectionProjectRepository,
@@ -14,6 +15,7 @@ import {
 
 const ProjectionProjectDbRow = ProjectionProject.mapFields(
   Struct.assign({
+    location: Schema.fromJsonString(ProjectLocation),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
@@ -31,6 +33,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           project_id,
           title,
           workspace_root,
+          location_json,
           default_model_selection_json,
           scripts_json,
           created_at,
@@ -41,6 +44,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.projectId},
           ${row.title},
           ${row.workspaceRoot},
+          ${JSON.stringify(row.location)},
           ${row.defaultModelSelection !== null ? JSON.stringify(row.defaultModelSelection) : null},
           ${JSON.stringify(row.scripts)},
           ${row.createdAt},
@@ -51,6 +55,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         DO UPDATE SET
           title = excluded.title,
           workspace_root = excluded.workspace_root,
+          location_json = excluded.location_json,
           default_model_selection_json = excluded.default_model_selection_json,
           scripts_json = excluded.scripts_json,
           created_at = excluded.created_at,
@@ -68,6 +73,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          location_json AS "location",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           created_at AS "createdAt",
@@ -75,6 +81,26 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           deleted_at AS "deletedAt"
         FROM projection_projects
         WHERE project_id = ${projectId}
+      `,
+  });
+
+  const getProjectionProjectRowByWorkspaceRoot = SqlSchema.findOneOption({
+    Request: GetProjectionProjectByWorkspaceRootInput,
+    Result: ProjectionProjectDbRow,
+    execute: ({ workspaceRoot }) =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          title,
+          workspace_root AS "workspaceRoot",
+          location_json AS "location",
+          default_model_selection_json AS "defaultModelSelection",
+          scripts_json AS "scripts",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_projects
+        WHERE workspace_root = ${workspaceRoot}
       `,
   });
 
@@ -87,6 +113,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          location_json AS "location",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           created_at AS "createdAt",
@@ -116,6 +143,13 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.getById:query")),
     );
 
+  const getByWorkspaceRoot: ProjectionProjectRepositoryShape["getByWorkspaceRoot"] = (input) =>
+    getProjectionProjectRowByWorkspaceRoot(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionProjectRepository.getByWorkspaceRoot:query"),
+      ),
+    );
+
   const listAll: ProjectionProjectRepositoryShape["listAll"] = () =>
     listProjectionProjectRows().pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.listAll:query")),
@@ -129,6 +163,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
   return {
     upsert,
     getById,
+    getByWorkspaceRoot,
     listAll,
     deleteById,
   } satisfies ProjectionProjectRepositoryShape;

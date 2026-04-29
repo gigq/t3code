@@ -116,6 +116,7 @@ const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
       projectId: PROJECT_ID,
       title: "Integration Project",
       workspaceRoot: harness.workspaceDir,
+      location: { kind: "local" },
       defaultModelSelection: {
         provider,
         model: defaultModel,
@@ -265,6 +266,7 @@ it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
           projectId: PROJECT_ID,
           title: "Integration Project",
           workspaceRoot: harness.workspaceDir,
+          location: { kind: "local" },
           defaultModelSelection: {
             provider: "codex",
             model: "gpt-5.3-codex",

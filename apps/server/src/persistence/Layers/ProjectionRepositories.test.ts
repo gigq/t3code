@@ -27,6 +27,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         projectId: ProjectId.makeUnsafe("project-null-options"),
         title: "Null options project",
         workspaceRoot: "/tmp/project-null-options",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5.4",

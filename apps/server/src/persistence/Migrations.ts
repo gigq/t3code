@@ -35,6 +35,7 @@ import Migration0019 from "./Migrations/019_ProjectionThreadsAutoDeferUntil.ts";
 import Migration0020 from "./Migrations/019_ProjectionSnapshotLookupIndexes.ts";
 import Migration0021 from "./Migrations/021_ProjectionThreadsConsecutiveAutoNoops.ts";
 import Migration0022 from "./Migrations/022_ProjectionThreadProposedPlanDismissal.ts";
+import Migration0023 from "./Migrations/023_ProjectionProjectsLocation.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -69,6 +70,7 @@ export const migrationEntries = [
   [20, "ProjectionSnapshotLookupIndexes", Migration0020],
   [21, "ProjectionThreadsConsecutiveAutoNoops", Migration0021],
   [22, "ProjectionThreadProposedPlanDismissal", Migration0022],
+  [23, "ProjectionProjectsLocation", Migration0023],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

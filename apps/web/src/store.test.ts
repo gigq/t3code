@@ -67,6 +67,7 @@ function makeState(thread: Thread): AppState {
         id: ProjectId.makeUnsafe("project-1"),
         name: "Project",
         cwd: "/tmp/project",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -146,6 +147,7 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
         id: ProjectId.makeUnsafe("project-1"),
         title: "Project",
         workspaceRoot: "/tmp/project",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5.3-codex",
@@ -167,6 +169,7 @@ function makeReadModelProject(
     id: ProjectId.makeUnsafe("project-1"),
     title: "Project",
     workspaceRoot: "/tmp/project",
+    location: { kind: "local" },
     defaultModelSelection: {
       provider: "codex",
       model: "gpt-5.3-codex",
@@ -797,6 +800,7 @@ describe("store read model sync", () => {
           id: project2,
           name: "Project 2",
           cwd: "/tmp/project-2",
+          location: { kind: "local" },
           defaultModelSelection: {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
@@ -807,6 +811,7 @@ describe("store read model sync", () => {
           id: project1,
           name: "Project 1",
           cwd: "/tmp/project-1",
+          location: { kind: "local" },
           defaultModelSelection: {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
@@ -920,6 +925,7 @@ describe("incremental orchestration updates", () => {
           id: originalProjectId,
           name: "Project",
           cwd: "/tmp/project",
+          location: { kind: "local" },
           defaultModelSelection: {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
@@ -939,6 +945,7 @@ describe("incremental orchestration updates", () => {
         projectId: recreatedProjectId,
         title: "Project Recreated",
         workspaceRoot: "/tmp/project",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
@@ -969,6 +976,7 @@ describe("incremental orchestration updates", () => {
           id: originalProjectId,
           name: "Project 1",
           cwd: "/tmp/project-1",
+          location: { kind: "local" },
           defaultModelSelection: {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
@@ -979,6 +987,7 @@ describe("incremental orchestration updates", () => {
           id: recreatedProjectId,
           name: "Project 2",
           cwd: "/tmp/project-2",
+          location: { kind: "local" },
           defaultModelSelection: {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,

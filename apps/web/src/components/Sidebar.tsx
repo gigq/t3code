@@ -706,7 +706,7 @@ export default function Sidebar() {
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { activeDraftThread, activeThread, handleNewThread } = useHandleNewThread();
-  const { importCodexThread } = useImportCodexThread();
+  const { importClaudeThread, importCodexThread } = useImportCodexThread();
   const { archiveThread, confirmAndDeleteThread, deleteThread } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadId = useParams({
@@ -726,6 +726,9 @@ export default function Sidebar() {
     ReadonlySet<ProjectId>
   >(() => new Set());
   const [importDialogProjectId, setImportDialogProjectId] = useState<ProjectId | null>(null);
+  const [importDialogProvider, setImportDialogProvider] = useState<"codex" | "claudeAgent">(
+    "codex",
+  );
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const projectRenamingCommittedRef = useRef(false);
   const projectRenamingInputRef = useRef<HTMLInputElement | null>(null);
@@ -841,9 +844,13 @@ export default function Sidebar() {
     [appSettings.sidebarThreadSortOrder, navigate, sidebarThreadsById, threadIdsByProjectId],
   );
 
-  const addProjectFromPath = useCallback(
-    async (rawCwd: string) => {
-      const cwd = rawCwd.trim();
+  const addProject = useCallback(
+    async (
+      input:
+        | { kind: "local"; path: string }
+        | { kind: "ssh"; host: string; port?: number; remotePath: string },
+    ) => {
+      const cwd = input.kind === "local" ? input.path.trim() : input.remotePath.trim();
       if (!cwd || isAddingProject) return;
       const api = readNativeApi();
       if (!api) {
@@ -851,8 +858,16 @@ export default function Sidebar() {
       }
 
       setIsAddingProject(true);
+      const normalizedPort = input.kind === "ssh" ? (input.port ?? 22) : undefined;
 
-      const existing = projects.find((project) => project.cwd === cwd);
+      const existing = projects.find((project) =>
+        input.kind === "local"
+          ? project.location.kind === "local" && project.cwd === cwd
+          : project.location.kind === "ssh" &&
+            project.location.host === input.host.trim() &&
+            (project.location.port ?? 22) === normalizedPort &&
+            project.location.remotePath === cwd,
+      );
       if (existing) {
         focusMostRecentThreadForProject(existing.id);
         setIsAddingProject(false);
@@ -862,7 +877,8 @@ export default function Sidebar() {
 
       const projectId = newProjectId();
       const createdAt = new Date().toISOString();
-      const title = cwd.split(/[/\\]/).findLast(isNonEmptyString) ?? cwd;
+      const baseTitle = cwd.split(/[/\\]/).findLast(isNonEmptyString) ?? cwd;
+      const title = input.kind === "local" ? baseTitle : `${baseTitle} @ ${input.host.trim()}`;
       try {
         await api.orchestration.dispatchCommand({
           type: "project.create",
@@ -870,6 +886,17 @@ export default function Sidebar() {
           projectId,
           title,
           workspaceRoot: cwd,
+          location:
+            input.kind === "local"
+              ? { kind: "local" }
+              : {
+                  kind: "ssh",
+                  host: input.host.trim(),
+                  ...(normalizedPort !== undefined && normalizedPort !== 22
+                    ? { port: normalizedPort }
+                    : {}),
+                  remotePath: cwd,
+                },
           defaultModelSelection: {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
@@ -909,7 +936,7 @@ export default function Sidebar() {
     }
     if (pickedPath) {
       try {
-        await addProjectFromPath(pickedPath);
+        await addProject({ kind: "local", path: pickedPath });
       } catch (error) {
         toastManager.add({
           type: "error",
@@ -1272,6 +1299,7 @@ export default function Sidebar() {
         [
           { id: "rename", label: "Rename project" },
           { id: "import-codex-thread", label: "Import Codex thread..." },
+          { id: "import-claude-thread", label: "Import Claude thread..." },
           { id: "copy-path", label: "Copy Project Path" },
           { id: "delete", label: "Remove project", destructive: true },
         ],
@@ -1286,6 +1314,12 @@ export default function Sidebar() {
         return;
       }
       if (clicked === "import-codex-thread") {
+        setImportDialogProvider("codex");
+        setImportDialogProjectId(projectId);
+        return;
+      }
+      if (clicked === "import-claude-thread") {
+        setImportDialogProvider("claudeAgent");
         setImportDialogProjectId(projectId);
         return;
       }
@@ -2234,13 +2268,16 @@ export default function Sidebar() {
         <ImportCodexThreadDialog
           open
           projectName={importDialogProject.name}
+          provider={importDialogProvider}
           onOpenChange={(open) => {
             if (!open) {
               setImportDialogProjectId(null);
             }
           }}
           onSubmit={async (input) => {
-            await importCodexThread({
+            const importThread =
+              importDialogProvider === "codex" ? importCodexThread : importClaudeThread;
+            await importThread({
               projectId: importDialogProject.id,
               providerThreadId: input.providerThreadId,
               ...(input.title ? { title: input.title } : {}),
@@ -2252,7 +2289,7 @@ export default function Sidebar() {
         <AddProjectDialog
           open={addingProject}
           onOpenChange={setAddingProject}
-          onSubmitPath={addProjectFromPath}
+          onSubmitProject={addProject}
         />
       ) : null}
     </>

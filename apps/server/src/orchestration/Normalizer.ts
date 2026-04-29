@@ -2,6 +2,7 @@ import { Effect, FileSystem, Path } from "effect";
 import {
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
+  DEFAULT_PROJECT_LOCATION,
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
@@ -29,16 +30,33 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       );
 
     if (command.type === "project.create") {
+      const location = command.location ?? DEFAULT_PROJECT_LOCATION;
+      const workspaceRoot =
+        location.kind === "ssh"
+          ? path.join(serverConfig.remoteWorkspacesDir, command.projectId)
+          : yield* normalizeProjectWorkspaceRoot(command.workspaceRoot);
       return {
         ...command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(command.workspaceRoot),
+        workspaceRoot,
+        location,
       } satisfies OrchestrationCommand;
     }
 
-    if (command.type === "project.meta.update" && command.workspaceRoot !== undefined) {
+    if (
+      command.type === "project.meta.update" &&
+      (command.workspaceRoot !== undefined || command.location !== undefined)
+    ) {
+      const location = command.location;
       return {
         ...command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(command.workspaceRoot),
+        ...(command.workspaceRoot !== undefined
+          ? {
+              workspaceRoot:
+                location?.kind === "ssh"
+                  ? path.join(serverConfig.remoteWorkspacesDir, command.projectId)
+                  : yield* normalizeProjectWorkspaceRoot(command.workspaceRoot),
+            }
+          : {}),
       } satisfies OrchestrationCommand;
     }
 

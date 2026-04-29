@@ -104,6 +104,7 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
+import ThreadDebugDrawer from "./ThreadDebugDrawer";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   BotIcon,
@@ -163,6 +164,7 @@ import {
   shouldUseCompactComposerFooter,
 } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { selectThreadDebugState, useThreadDebugStateStore } from "../threadDebugStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { ForkThreadDialog } from "./ForkThreadDialog";
@@ -822,6 +824,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => selectThreadTerminalState(terminalStateByThreadId, threadId),
     [terminalStateByThreadId, threadId],
   );
+  const debugStateByThreadId = useThreadDebugStateStore((state) => state.debugStateByThreadId);
+  const debugState = useMemo(
+    () => selectThreadDebugState(debugStateByThreadId, threadId),
+    [debugStateByThreadId, threadId],
+  );
   const openTerminalThreadIds = useMemo(
     () =>
       Object.entries(terminalStateByThreadId).flatMap(([nextThreadId, nextTerminalState]) =>
@@ -840,6 +847,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const storeClearTerminalLaunchContext = useTerminalStateStore(
     (s) => s.clearTerminalLaunchContext,
   );
+  const storeSetDebugOpen = useThreadDebugStateStore((state) => state.setDebugOpen);
+  const storeSetDebugHeight = useThreadDebugStateStore((state) => state.setDebugHeight);
+  const storeSyncThreadSnapshot = useStore((state) => state.syncThreadSnapshot);
   const threads = useStore((state) => state.threads);
   const serverThreadIds = useMemo(() => threads.map((thread) => thread.id), [threads]);
   const draftThreadsByThreadId = useComposerDraftStore((store) => store.draftThreadsByThreadId);
@@ -848,6 +858,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [draftThreadsByThreadId],
   );
   const [mountedTerminalThreadIds, setMountedTerminalThreadIds] = useState<ThreadId[]>([]);
+  const [loadingPreviousMessages, setLoadingPreviousMessages] = useState(false);
 
   const setPrompt = useCallback(
     (nextPrompt: string) => {
@@ -1803,6 +1814,59 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [setStoreThreadError],
   );
+  const canLoadPreviousMessages = Boolean(
+    activeThread?.hasMoreMessagesBefore && activeThread.messages.length > 0,
+  );
+  const loadPreviousMessages = useCallback(async () => {
+    if (!activeThread || !canLoadPreviousMessages || loadingPreviousMessages) {
+      return;
+    }
+
+    const earliestMessage = activeThread.messages[0];
+    if (!earliestMessage) {
+      return;
+    }
+
+    const scrollContainer = messagesScrollRef.current;
+    const anchorElement = scrollContainer?.querySelector<HTMLElement>(
+      `[data-timeline-row-id="${CSS.escape(earliestMessage.id)}"]`,
+    );
+    const anchorTop = anchorElement?.getBoundingClientRect().top ?? null;
+
+    setLoadingPreviousMessages(true);
+    try {
+      const api = readNativeApi();
+      if (!api) {
+        throw new Error("Native API is unavailable.");
+      }
+      const snapshot = await api.orchestration.getThreadSnapshot({
+        threadId: activeThread.id,
+        beforeMessageId: earliestMessage.id,
+      });
+      storeSyncThreadSnapshot(snapshot);
+
+      if (anchorElement && anchorTop !== null) {
+        window.requestAnimationFrame(() => {
+          const activeScrollContainer = messagesScrollRef.current;
+          if (!activeScrollContainer || !anchorElement.isConnected) {
+            return;
+          }
+          const nextTop = anchorElement.getBoundingClientRect().top;
+          activeScrollContainer.scrollTop += nextTop - anchorTop;
+          lastKnownScrollTopRef.current = activeScrollContainer.scrollTop;
+        });
+      }
+    } catch (error) {
+      toastManager.add({
+        type: "warning",
+        title: "Failed to load previous messages",
+        description:
+          error instanceof Error ? error.message : "Unable to load older thread history.",
+      });
+    } finally {
+      setLoadingPreviousMessages(false);
+    }
+  }, [activeThread, canLoadPreviousMessages, loadingPreviousMessages, storeSyncThreadSnapshot]);
 
   const focusComposer = useCallback(() => {
     composerEditorRef.current?.focusAtEnd();
@@ -1865,6 +1929,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!activeThreadId) return;
     setTerminalOpen(!terminalState.terminalOpen);
   }, [activeThreadId, setTerminalOpen, terminalState.terminalOpen]);
+  const setDebugOpen = useCallback(
+    (open: boolean) => {
+      if (!activeThreadId) return;
+      storeSetDebugOpen(activeThreadId, open);
+    },
+    [activeThreadId, storeSetDebugOpen],
+  );
+  const toggleDebugVisibility = useCallback(() => {
+    if (!activeThreadId) return;
+    setDebugOpen(!debugState.debugOpen);
+  }, [activeThreadId, debugState.debugOpen, setDebugOpen]);
+  const setDebugHeight = useCallback(
+    (height: number) => {
+      if (!activeThreadId) return;
+      storeSetDebugHeight(activeThreadId, height);
+    },
+    [activeThreadId, storeSetDebugHeight],
+  );
   const splitTerminal = useCallback(() => {
     if (!activeThreadId || hasReachedSplitLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
@@ -4270,6 +4352,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           keybindings={keybindings}
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalState.terminalOpen}
+          debugOpen={debugState.debugOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
@@ -4283,6 +4366,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onForkThread={openForkDialog}
           onToggleTerminal={toggleTerminalVisibility}
+          onToggleDebug={toggleDebugVisibility}
           onToggleDiff={onToggleDiff}
         />
       </header>
@@ -4319,6 +4403,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   Loading thread history...
                 </div>
               )}
+              {canLoadPreviousMessages ? (
+                <div className="mb-3 flex justify-center">
+                  <button
+                    type="button"
+                    data-scroll-anchor-target
+                    disabled={loadingPreviousMessages}
+                    onClick={() => void loadPreviousMessages()}
+                    className="rounded-full border border-border/60 bg-card/90 px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {loadingPreviousMessages
+                      ? "Loading previous messages..."
+                      : "Load previous messages"}
+                  </button>
+                </div>
+              ) : null}
               <MessagesTimeline
                 key={activeThread.id}
                 hasMessages={timelineEntries.length > 0}
@@ -4866,6 +4965,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onAddTerminalContext={addTerminalContextToDraft}
         />
       ))}
+      {activeThreadId ? (
+        <ThreadDebugDrawer
+          threadId={activeThreadId}
+          visible={debugState.debugOpen}
+          height={debugState.debugHeight}
+          onHeightChange={setDebugHeight}
+          onClose={() => setDebugOpen(false)}
+        />
+      ) : null}
 
       {expandedImage && expandedImageItem && (
         <div

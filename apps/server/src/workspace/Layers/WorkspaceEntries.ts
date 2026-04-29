@@ -11,6 +11,11 @@ import {
   WorkspaceEntriesError,
   type WorkspaceEntriesShape,
 } from "../Services/WorkspaceEntries.ts";
+import {
+  RemoteWorkspaces,
+  type RemoteWorkspaceError,
+  type ResolvedRemoteWorkspace,
+} from "../Services/RemoteWorkspaces.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
 
 const WORKSPACE_CACHE_TTL_MS = 15_000;
@@ -221,6 +226,14 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const path = yield* Path.Path;
   const gitOption = yield* Effect.serviceOption(GitCore);
   const workspacePaths = yield* WorkspacePaths;
+  const remoteWorkspacesOption = yield* Effect.serviceOption(RemoteWorkspaces);
+
+  const resolveRemoteWorkspace = (
+    cwd: string,
+  ): Effect.Effect<Option.Option<ResolvedRemoteWorkspace>, RemoteWorkspaceError> =>
+    Option.isSome(remoteWorkspacesOption)
+      ? remoteWorkspacesOption.value.resolveWorkspaceRoot(cwd)
+      : Effect.succeed(Option.none());
 
   const isInsideGitWorkTree = (cwd: string): Effect.Effect<boolean> =>
     Option.match(gitOption, {
@@ -427,6 +440,24 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     if (gitIndexed) {
       return gitIndexed;
     }
+    const remoteWorkspace = yield* resolveRemoteWorkspace(cwd).pipe(
+      Effect.mapError(
+        (cause) =>
+          new WorkspaceEntriesError({
+            cwd,
+            operation: "workspaceEntries.resolveRemoteWorkspace",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+    if (Option.isSome(remoteWorkspace)) {
+      return {
+        scannedAt: Date.now(),
+        entries: [],
+        truncated: false,
+      };
+    }
     return yield* buildWorkspaceIndexFromFilesystem(cwd);
   });
 
@@ -440,6 +471,20 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const normalizeWorkspaceRoot = Effect.fn("WorkspaceEntries.normalizeWorkspaceRoot")(function* (
     cwd: string,
   ): Effect.fn.Return<string, WorkspaceEntriesError> {
+    const remoteWorkspace = yield* resolveRemoteWorkspace(cwd).pipe(
+      Effect.mapError(
+        (cause) =>
+          new WorkspaceEntriesError({
+            cwd,
+            operation: "workspaceEntries.resolveRemoteWorkspace",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+    if (Option.isSome(remoteWorkspace)) {
+      return cwd;
+    }
     return yield* workspacePaths.normalizeWorkspaceRoot(cwd).pipe(
       Effect.mapError(
         (cause) =>

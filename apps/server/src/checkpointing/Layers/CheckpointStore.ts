@@ -11,13 +11,19 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { Effect, Layer, FileSystem, Path } from "effect";
+import { Effect, Layer, FileSystem, Option, Path } from "effect";
 
 import { CheckpointInvariantError } from "../Errors.ts";
 import { GitCommandError } from "@t3tools/contracts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
 import { CheckpointRef } from "@t3tools/contracts";
+import {
+  RemoteWorkspaces,
+  type RemoteWorkspaceError,
+  type ResolvedRemoteWorkspace,
+} from "../../workspace/Services/RemoteWorkspaces.ts";
+import { shellQuote } from "../../workspace/RemoteShell.ts";
 
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
@@ -25,6 +31,14 @@ const makeCheckpointStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const git = yield* GitCore;
+  const remoteWorkspacesOption = yield* Effect.serviceOption(RemoteWorkspaces);
+
+  const resolveRemoteWorkspace = (
+    cwd: string,
+  ): Effect.Effect<Option.Option<ResolvedRemoteWorkspace>, RemoteWorkspaceError> =>
+    Option.isSome(remoteWorkspacesOption)
+      ? remoteWorkspacesOption.value.resolveWorkspaceRoot(cwd)
+      : Effect.succeed(Option.none());
 
   const resolveHeadCommit = (cwd: string): Effect.Effect<string | null, GitCommandError> =>
     git
@@ -92,13 +106,75 @@ const makeCheckpointStore = Effect.gen(function* () {
     "captureCheckpoint",
   )(function* (input) {
     const operation = "CheckpointStore.captureCheckpoint";
+    const remoteWorkspace = yield* resolveRemoteWorkspace(input.cwd).pipe(
+      Effect.mapError(
+        (cause) =>
+          new CheckpointInvariantError({
+            operation,
+            detail: "Failed to resolve remote workspace.",
+            cause,
+          }),
+      ),
+    );
+
+    const acquireLocalTempDirectory = fs.makeTempDirectory({ prefix: "t3-fs-checkpoint-" }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new CheckpointInvariantError({
+            operation,
+            detail: "Failed to create checkpoint temp directory.",
+            cause,
+          }),
+      ),
+    );
+    const acquireTempDirectory: Effect.Effect<string, CheckpointInvariantError> =
+      Option.isSome(remoteWorkspace) && Option.isSome(remoteWorkspacesOption)
+        ? remoteWorkspacesOption.value
+            .runShell({
+              cwd: input.cwd,
+              script: 'mktemp -d "${TMPDIR:-/tmp}/t3-fs-checkpoint.XXXXXX"',
+            })
+            .pipe(
+              Effect.map((result) => result.stdout.trim()),
+              Effect.flatMap((tempDir) =>
+                tempDir.length > 0
+                  ? Effect.succeed(tempDir)
+                  : Effect.fail(
+                      new CheckpointInvariantError({
+                        operation,
+                        detail: "Remote mktemp returned an empty checkpoint directory.",
+                      }),
+                    ),
+              ),
+              Effect.mapError((cause) =>
+                cause._tag === "CheckpointInvariantError"
+                  ? cause
+                  : new CheckpointInvariantError({
+                      operation,
+                      detail: "Failed to create remote checkpoint temp directory.",
+                      cause,
+                    }),
+              ),
+            )
+        : acquireLocalTempDirectory;
+
+    const releaseTempDirectory = (tempDir: string) =>
+      (Option.isSome(remoteWorkspace) && Option.isSome(remoteWorkspacesOption)
+        ? remoteWorkspacesOption.value
+            .runShell({
+              cwd: input.cwd,
+              script: `rm -rf -- ${shellQuote(tempDir)}`,
+              options: { allowNonZeroExit: true },
+            })
+            .pipe(Effect.asVoid)
+        : fs.remove(tempDir, { recursive: true })
+      ).pipe(Effect.ignore);
 
     yield* Effect.acquireUseRelease(
-      fs.makeTempDirectory({ prefix: "t3-fs-checkpoint-" }),
-      Effect.fn("captureCheckpoint.withTempDirectory")(function* (tempDir) {
+      acquireTempDirectory,
+      Effect.fn("captureCheckpoint.withTempDirectory")(function* (tempDir: string) {
         const tempIndexPath = path.join(tempDir, `index-${randomUUID()}`);
         const commitEnv: NodeJS.ProcessEnv = {
-          ...process.env,
           GIT_INDEX_FILE: tempIndexPath,
           GIT_AUTHOR_NAME: "T3 Code",
           GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
@@ -162,18 +238,7 @@ const makeCheckpointStore = Effect.gen(function* () {
           args: ["update-ref", input.checkpointRef, commitOid],
         });
       }),
-      (tempDir) => fs.remove(tempDir, { recursive: true }),
-    ).pipe(
-      Effect.catchTags({
-        PlatformError: (error) =>
-          Effect.fail(
-            new CheckpointInvariantError({
-              operation: "CheckpointStore.captureCheckpoint",
-              detail: "Failed to capture checkpoint.",
-              cause: error,
-            }),
-          ),
-      }),
+      releaseTempDirectory,
     );
   });
 

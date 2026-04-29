@@ -262,6 +262,7 @@ function createSnapshotForTargetUser(options: {
         id: PROJECT_ID,
         title: "Project",
         workspaceRoot: "/repo/project",
+        location: { kind: "local" },
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5",
