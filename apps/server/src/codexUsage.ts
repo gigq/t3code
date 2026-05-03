@@ -323,10 +323,11 @@ export function normalizeCodexbarUsagePayload(payload: unknown): ServerCodexUsag
 }
 
 async function getCodexbarProviderUsage(provider: string): Promise<ServerProviderUsage> {
+  const source = process.platform === "darwin" ? "auto" : "cli";
   try {
     const result = await runProcess(
       "codexbar",
-      ["--provider", provider, "--source", "auto", "--format", "json"],
+      ["usage", "--provider", provider, "--source", source, "--format", "json"],
       {
         timeoutMs: CODEXBAR_TIMEOUT_MS,
         maxBufferBytes: CODEXBAR_MAX_BUFFER_BYTES,

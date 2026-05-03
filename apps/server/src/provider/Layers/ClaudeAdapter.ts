@@ -2425,6 +2425,13 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const runFork = Effect.runForkWith(services);
       const runPromise = Effect.runPromiseWith(services);
 
+      const existingContext = sessions.get(threadId);
+      if (existingContext) {
+        yield* stopSessionInternal(existingContext, {
+          emitExitEvent: false,
+        });
+      }
+
       const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
       const prompt = Stream.fromQueue(promptQueue).pipe(
         Stream.filter((item) => item.type === "message"),

@@ -136,7 +136,8 @@ function makeHarness(config?: {
   readonly cwd?: string;
   readonly baseDir?: string;
 }) {
-  const query = new FakeClaudeQuery();
+  let query = new FakeClaudeQuery();
+  const queries: Array<FakeClaudeQuery> = [];
   let createInput:
     | {
         readonly prompt: AsyncIterable<SDKUserMessage>;
@@ -146,6 +147,8 @@ function makeHarness(config?: {
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     createQuery: (input) => {
+      query = new FakeClaudeQuery();
+      queries.push(query);
       createInput = input;
       return query;
     },
@@ -172,7 +175,10 @@ function makeHarness(config?: {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     ),
-    query,
+    get query() {
+      return query;
+    },
+    queries,
     getLastCreateQueryInput: () => createInput,
   };
 }
@@ -325,6 +331,31 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("closes an existing claude session before replacing it", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      const firstQuery = harness.query;
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(firstQuery.closeCalls, 1);
+      assert.equal(harness.queries.length, 2);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("forwards claude effort levels into query options", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -334,7 +365,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
           options: {
             effort: "max",
           },
@@ -461,7 +492,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
           options: {
             fastMode: true,
           },
@@ -2381,12 +2412,12 @@ describe("ClaudeAdapterLive", () => {
         input: "hello",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
         },
         attachments: [],
       });
 
-      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6"]);
+      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-7"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -2401,7 +2432,7 @@ describe("ClaudeAdapterLive", () => {
         const adapter = yield* ClaudeAdapter;
         const modelSelection = {
           provider: "claudeAgent" as const,
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
         };
 
         const session = yield* adapter.startSession({
@@ -2448,7 +2479,7 @@ describe("ClaudeAdapterLive", () => {
         input: "hello",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
           options: {
             contextWindow: "1m",
           },
@@ -2460,12 +2491,12 @@ describe("ClaudeAdapterLive", () => {
         input: "hello again",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
         },
         attachments: [],
       });
 
-      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]", "claude-opus-4-6"]);
+      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-7[1m]", "claude-opus-4-7"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

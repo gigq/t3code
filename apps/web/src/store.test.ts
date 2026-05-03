@@ -273,14 +273,14 @@ describe("store read model sync", () => {
       makeReadModelThread({
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
         },
       }),
     );
 
     const next = syncServerReadModel(initialState, readModel);
 
-    expect(next.threads[0]?.modelSelection.model).toBe("claude-opus-4-6");
+    expect(next.threads[0]?.modelSelection.model).toBe("claude-opus-4-7");
   });
 
   it("resolves claude aliases when session provider is claudeAgent", () => {
