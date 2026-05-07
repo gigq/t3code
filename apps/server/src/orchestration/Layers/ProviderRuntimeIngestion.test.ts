@@ -3386,6 +3386,68 @@ describe("ProviderRuntimeIngestion", () => {
     ]);
   });
 
+  it("omits image-view raw payloads while preserving a bounded preview", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-item-completed-image-view"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-p1"),
+      itemId: asItemId("item-p1-image"),
+      payload: {
+        itemType: "image_view",
+        status: "completed",
+        title: "Image view",
+        data: {
+          item: {
+            type: "imageGeneration",
+            id: "ig_123",
+            result: "ZmFrZS1pbWFnZQ==",
+            savedPath: "/Users/justin/.codex/generated_images/thread/ig_123.png",
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-item-completed-image-view",
+      ),
+    );
+
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-item-completed-image-view",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+    const data =
+      payload?.data && typeof payload.data === "object"
+        ? (payload.data as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.completed");
+    expect(payload?.itemType).toBe("image_view");
+    expect(data?.toolName).toBe("image_view");
+    expect(data?.resultOmitted).toBe(true);
+    expect(data?.item).toBeUndefined();
+    expect(data?.savedPath).toBe("/Users/justin/.codex/generated_images/thread/ig_123.png");
+    expect(data?.screenshots).toEqual([
+      {
+        type: "image",
+        mediaType: "image/png",
+        data: "ZmFrZS1pbWFnZQ==",
+        name: "ig_123.png",
+        savedPath: "/Users/justin/.codex/generated_images/thread/ig_123.png",
+      },
+    ]);
+  });
+
   it("projects context window updates into normalized thread activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

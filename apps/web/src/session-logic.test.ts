@@ -981,6 +981,43 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("extracts image-view previews from sanitized image generation payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "image-view-with-preview",
+        kind: "tool.completed",
+        summary: "Image view",
+        payload: {
+          itemType: "image_view",
+          title: "Image view",
+          data: {
+            toolName: "image_view",
+            savedPath: "/Users/justin/.codex/generated_images/thread/ig_123.png",
+            screenshots: [
+              {
+                type: "image",
+                mediaType: "image/png",
+                data: "aW1hZ2Utdmlldw==",
+                name: "ig_123.png",
+              },
+            ],
+            resultOmitted: true,
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.itemType).toBe("image_view");
+    expect(entry?.screenshots).toEqual([
+      {
+        id: "image-view-with-preview:screenshot:1",
+        name: "ig_123.png",
+        previewUrl: "data:image/png;base64,aW1hZ2Utdmlldw==",
+      },
+    ]);
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

@@ -197,4 +197,57 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Get app state");
     expect(markup).toContain("Screenshot");
   });
+
+  it("renders image actions for image-view work-log entries with previews", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Image view",
+              tone: "tool",
+              itemType: "image_view",
+              screenshots: [
+                {
+                  id: "work-1:screenshot:1",
+                  name: "ig_123.png",
+                  previewUrl: "data:image/png;base64,aW1hZ2Utdmlldw==",
+                },
+              ],
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Image view");
+    expect(markup).toContain("Image");
+    expect(markup).not.toContain("Screenshot");
+  });
 });

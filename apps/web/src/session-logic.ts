@@ -984,7 +984,7 @@ function extractToolScreenshots(
           "image/png";
         return {
           id: `${activityId}:screenshot:${screenshotIndex}`,
-          name: `${toolName} screenshot ${screenshotIndex}`,
+          name: asTrimmedString(block.name) ?? `${toolName} screenshot ${screenshotIndex}`,
           previewUrl: `data:${mimeType};base64,${base64}`,
         };
       }
@@ -998,7 +998,7 @@ function extractToolScreenshots(
         screenshotIndex += 1;
         return {
           id: `${activityId}:screenshot:${screenshotIndex}`,
-          name: `${toolName} screenshot ${screenshotIndex}`,
+          name: asTrimmedString(block.name) ?? `${toolName} screenshot ${screenshotIndex}`,
           previewUrl: src,
         };
       }

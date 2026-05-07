@@ -94,6 +94,8 @@ function truncateDetail(value: string, limit = 180): string {
 
 const UI_AUTOMATION_DATA_OMISSION_REASON =
   "desktop-use/computer-use result omitted from persisted T3 history to avoid oversized thread payloads.";
+const IMAGE_VIEW_DATA_OMISSION_REASON =
+  "image-view raw provider payload omitted from persisted T3 history; a bounded preview was retained.";
 const MAX_PERSISTED_UI_AUTOMATION_SCREENSHOTS = 1;
 const MAX_PERSISTED_UI_AUTOMATION_SCREENSHOT_BASE64_CHARS = 6_000_000;
 
@@ -214,6 +216,68 @@ function extractPersistableScreenshotPreviews(data: unknown): {
   return { screenshots, omittedCount };
 }
 
+function baseName(value: string): string {
+  const normalized = value.replaceAll("\\", "/");
+  const index = normalized.lastIndexOf("/");
+  return index >= 0 ? normalized.slice(index + 1) : normalized;
+}
+
+function extractPersistableImageViewPreview(data: unknown): {
+  readonly screenshots: ReadonlyArray<Record<string, unknown>>;
+  readonly omittedCount: number;
+  readonly savedPath?: string | undefined;
+} {
+  const record = asRecord(data);
+  const item = asRecord(record?.item) ?? record;
+  const savedPath = asTrimmedString(item?.savedPath) ?? asTrimmedString(record?.savedPath);
+  const base64 = asTrimmedString(item?.result) ?? asTrimmedString(record?.result);
+  if (!base64) {
+    return {
+      screenshots: [],
+      omittedCount: 0,
+      ...(savedPath ? { savedPath } : {}),
+    };
+  }
+  if (base64.length > MAX_PERSISTED_UI_AUTOMATION_SCREENSHOT_BASE64_CHARS) {
+    return {
+      screenshots: [],
+      omittedCount: 1,
+      ...(savedPath ? { savedPath } : {}),
+    };
+  }
+
+  const mediaType =
+    asTrimmedString(item?.mediaType) ??
+    asTrimmedString(item?.media_type) ??
+    asTrimmedString(record?.mediaType) ??
+    asTrimmedString(record?.media_type) ??
+    "image/png";
+  return {
+    screenshots: [
+      {
+        type: "image",
+        mediaType,
+        data: base64,
+        ...(savedPath ? { name: baseName(savedPath), savedPath } : {}),
+      },
+    ],
+    omittedCount: 0,
+    ...(savedPath ? { savedPath } : {}),
+  };
+}
+
+function sanitizePersistedImageViewData(data: unknown): unknown {
+  const preview = extractPersistableImageViewPreview(data);
+  return {
+    toolName: "image_view",
+    ...(preview.savedPath ? { savedPath: preview.savedPath } : {}),
+    ...(preview.screenshots.length > 0 ? { screenshots: preview.screenshots } : {}),
+    ...(preview.omittedCount > 0 ? { screenshotsOmitted: preview.omittedCount } : {}),
+    resultOmitted: true,
+    omissionReason: IMAGE_VIEW_DATA_OMISSION_REASON,
+  };
+}
+
 function sanitizePersistedToolData(data: unknown): unknown {
   const uiAutomationToolName = getLargeUiAutomationToolName(data);
   if (!uiAutomationToolName) {
@@ -240,7 +304,18 @@ function sanitizePersistedToolData(data: unknown): unknown {
 function shouldPersistCompletedToolData(
   event: Extract<ProviderRuntimeEvent, { type: "item.completed" }>,
 ) {
-  return event.payload.itemType === "mcp_tool_call" && event.payload.data !== undefined;
+  return (
+    (event.payload.itemType === "mcp_tool_call" || event.payload.itemType === "image_view") &&
+    event.payload.data !== undefined
+  );
+}
+
+function sanitizePersistedCompletedToolData(
+  event: Extract<ProviderRuntimeEvent, { type: "item.completed" }>,
+): unknown {
+  return event.payload.itemType === "image_view"
+    ? sanitizePersistedImageViewData(event.payload.data)
+    : sanitizePersistedToolData(event.payload.data);
 }
 
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
@@ -712,7 +787,7 @@ function runtimeEventToActivities(
             ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(shouldPersistCompletedToolData(event)
-              ? { data: sanitizePersistedToolData(event.payload.data) }
+              ? { data: sanitizePersistedCompletedToolData(event) }
               : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,

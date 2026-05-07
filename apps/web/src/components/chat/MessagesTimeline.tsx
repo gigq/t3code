@@ -868,6 +868,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
   const screenshots = workEntry.screenshots ?? [];
   const screenshotCount = screenshots.length;
+  const imagePreviewLabel = workEntry.itemType === "image_view" ? "Image" : "Screenshot";
+  const imagePreviewPluralLabel =
+    workEntry.itemType === "image_view"
+      ? `${screenshotCount} images`
+      : `${screenshotCount} screenshots`;
 
   return (
     <div className="rounded-lg px-1 py-1">
@@ -932,7 +937,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             }}
           >
             <EyeIcon className="size-3" />
-            <span>{screenshotCount === 1 ? "Screenshot" : `${screenshotCount} screenshots`}</span>
+            <span>{screenshotCount === 1 ? imagePreviewLabel : imagePreviewPluralLabel}</span>
           </button>
         )}
       </div>
