@@ -92,6 +92,62 @@ function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
+const UI_AUTOMATION_DATA_OMISSION_REASON =
+  "desktop-use/computer-use result omitted from persisted T3 history to avoid oversized thread payloads.";
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function isLargeUiAutomationMcpServer(server: string): boolean {
+  return server === "desktop-use" || server === "computer-use";
+}
+
+function getLargeUiAutomationToolName(data: unknown): string | undefined {
+  const record = asRecord(data);
+  if (!record) {
+    return undefined;
+  }
+
+  const directToolName = typeof record.toolName === "string" ? record.toolName : undefined;
+  if (
+    directToolName?.startsWith("mcp__desktop-use__") ||
+    directToolName?.startsWith("mcp__computer-use__")
+  ) {
+    return directToolName;
+  }
+
+  const item = asRecord(record.item);
+  if (!item) {
+    return undefined;
+  }
+  const server = typeof item.server === "string" ? item.server : undefined;
+  if (!server || !isLargeUiAutomationMcpServer(server)) {
+    return undefined;
+  }
+
+  const tool = typeof item.tool === "string" ? item.tool : undefined;
+  return tool ? `mcp__${server}__${tool}` : `mcp__${server}`;
+}
+
+function sanitizePersistedToolData(data: unknown): unknown {
+  const uiAutomationToolName = getLargeUiAutomationToolName(data);
+  if (!uiAutomationToolName) {
+    return data;
+  }
+
+  const record = asRecord(data);
+  const input = record?.input;
+  return {
+    toolName: uiAutomationToolName,
+    ...(input !== undefined ? { input } : {}),
+    resultOmitted: true,
+    omissionReason: UI_AUTOMATION_DATA_OMISSION_REASON,
+  };
+}
+
 function shouldPersistCompletedToolData(
   event: Extract<ProviderRuntimeEvent, { type: "item.completed" }>,
 ) {
@@ -541,7 +597,9 @@ function runtimeEventToActivities(
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: sanitizePersistedToolData(event.payload.data) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -564,7 +622,9 @@ function runtimeEventToActivities(
             itemType: event.payload.itemType,
             ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(shouldPersistCompletedToolData(event) ? { data: event.payload.data } : {}),
+            ...(shouldPersistCompletedToolData(event)
+              ? { data: sanitizePersistedToolData(event.payload.data) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

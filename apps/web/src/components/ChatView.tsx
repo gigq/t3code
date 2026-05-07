@@ -1674,6 +1674,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           label: "/auto",
           description: "Continue this thread in the background when it is idle",
         },
+        {
+          id: "slash:compact",
+          type: "slash-command",
+          command: "compact",
+          label: "/compact",
+          description: "Drop the current provider session context before the next turn",
+        },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
@@ -2267,6 +2274,31 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
+  const handleContextCompact = useCallback(async () => {
+    if (isLocalDraftThread) {
+      scheduleComposerFocus();
+      return;
+    }
+    const api = readNativeApi();
+    if (!api || !serverThread) {
+      scheduleComposerFocus();
+      return;
+    }
+    await api.orchestration.dispatchCommand({
+      type: "thread.session.stop",
+      commandId: newCommandId(),
+      threadId,
+      clearResumeCursor: true,
+      createdAt: new Date().toISOString(),
+    });
+    toastManager.add({
+      type: "success",
+      title: "Context compacted",
+      description:
+        "The provider session was stopped. The next turn starts fresh without the old native context.",
+    });
+    scheduleComposerFocus();
+  }, [isLocalDraftThread, scheduleComposerFocus, serverThread, threadId]);
   const handleAutoDeferChange = useCallback(
     async (preset: AutoModeDeferPreset | null) => {
       if (!serverThread) {
@@ -3233,7 +3265,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
+      if (standaloneSlashCommand === "compact") {
+        await handleContextCompact();
+      } else {
+        handleInteractionModeChange(standaloneSlashCommand);
+      }
       promptRef.current = "";
       clearComposerDraftContent(activeThread.id);
       setComposerHighlightedItemId(null);
@@ -4140,6 +4176,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
+        if (item.command === "compact") {
+          void handleContextCompact();
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
         void handleInteractionModeChange(
           item.command === "plan" ? "plan" : item.command === "auto" ? "auto" : "default",
         );
@@ -4161,6 +4207,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       applyPromptReplacement,
+      handleContextCompact,
       handleInteractionModeChange,
       onProviderModelSelect,
       resolveActiveComposerTrigger,

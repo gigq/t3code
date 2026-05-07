@@ -273,6 +273,27 @@ describe("forkThread helpers", () => {
     expect(prompt).toContain("Answer after compaction");
   });
 
+  it("formats session restart bootstrap prompts without fork language", () => {
+    const prompt = buildForkBootstrapPrompt({
+      promptKind: "session-restart",
+      history: [
+        {
+          role: "user",
+          text: "Previous request",
+        },
+        {
+          role: "assistant",
+          text: "Previous answer",
+        },
+      ],
+      nextUserMessage: "Continue from there",
+    });
+
+    expect(prompt).toContain("Continue this conversation.");
+    expect(prompt).toContain("prior context from this T3 thread");
+    expect(prompt).not.toContain("forked");
+  });
+
   it("ignores messages and compactions after an explicit fork message boundary", () => {
     const turnId = TurnId.makeUnsafe("turn-source");
     const thread = {

@@ -87,18 +87,55 @@ function buildImportedThreadBootstrapInput(input: {
 
   const seededInput = buildForkBootstrapPrompt({
     compaction,
-    history: history.map((message) =>
-      message.attachments
-        ? {
-            role: message.role,
-            text: message.text,
-            attachments: message.attachments,
-          }
-        : {
-            role: message.role,
-            text: message.text,
-          },
-    ),
+    history: history.map((message) => toBootstrapPromptMessage(message)),
+    nextUserMessage: input.messageText,
+  });
+  return seededInput === input.messageText ? undefined : seededInput;
+}
+
+function toBootstrapPromptMessage(message: {
+  readonly role: "user" | "assistant";
+  readonly text: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+}): {
+  readonly role: "user" | "assistant";
+  readonly text: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
+} {
+  return message.attachments
+    ? {
+        role: message.role,
+        text: message.text,
+        attachments: message.attachments,
+      }
+    : {
+        role: message.role,
+        text: message.text,
+      };
+}
+
+function buildSessionRestartBootstrapInput(input: {
+  readonly thread: OrchestrationThread;
+  readonly messageId: string;
+  readonly messageText: string;
+}): string | undefined {
+  const messageIndex = input.thread.messages.findIndex((message) => message.id === input.messageId);
+  if (messageIndex <= 0) {
+    return undefined;
+  }
+
+  const { compaction, history } = selectForkBootstrapMessages({
+    thread: input.thread,
+    beforeMessageId: input.messageId,
+  });
+  if (history.length === 0 && !compaction?.summary) {
+    return undefined;
+  }
+
+  const seededInput = buildForkBootstrapPrompt({
+    promptKind: "session-restart",
+    compaction,
+    history: history.map((message) => toBootstrapPromptMessage(message)),
     nextUserMessage: input.messageText,
   });
   return seededInput === input.messageText ? undefined : seededInput;
@@ -837,9 +874,20 @@ const make = Effect.gen(function* () {
       }
     }
 
-    const bootstrapInput =
+    const hasProviderRuntimeSession = yield* providerService
+      .listSessions()
+      .pipe(Effect.map((sessions) => sessions.some((session) => session.threadId === thread.id)));
+    const importedBootstrapInput =
       message.role === "user"
         ? buildImportedThreadBootstrapInput({
+            thread,
+            messageId: message.id,
+            messageText: message.text,
+          })
+        : undefined;
+    const sessionRestartBootstrapInput =
+      importedBootstrapInput === undefined && !hasProviderRuntimeSession
+        ? buildSessionRestartBootstrapInput({
             thread,
             messageId: message.id,
             messageText: message.text,
@@ -848,7 +896,7 @@ const make = Effect.gen(function* () {
 
     yield* sendTurnForThread({
       threadId: event.payload.threadId,
-      messageText: bootstrapInput ?? message.text,
+      messageText: importedBootstrapInput ?? sessionRestartBootstrapInput ?? message.text,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
@@ -1003,10 +1051,11 @@ const make = Effect.gen(function* () {
       });
     }
 
-    if (thread.session && thread.session.status !== "stopped") {
+    const clearResumeCursor = event.payload.clearResumeCursor === true;
+    if (clearResumeCursor || (thread.session && thread.session.status !== "stopped")) {
       yield* providerService.stopSession({
         threadId: thread.id,
-        preserveBinding: true,
+        preserveBinding: !clearResumeCursor,
       });
     }
 
@@ -1018,7 +1067,7 @@ const make = Effect.gen(function* () {
         providerName: thread.session?.providerName ?? null,
         runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         activeTurnId: null,
-        lastError: thread.session?.lastError ?? null,
+        lastError: clearResumeCursor ? null : (thread.session?.lastError ?? null),
         updatedAt: now,
       },
       createdAt: now,

@@ -258,13 +258,16 @@ export function buildForkBootstrapPrompt(input: {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
   }>;
   readonly nextUserMessage: string;
+  readonly promptKind?: "fork" | "session-restart";
   readonly maxChars?: number;
 }): string {
+  const promptKind = input.promptKind ?? "fork";
+  const contextName = promptKind === "session-restart" ? "conversation" : "forked conversation";
   if (input.history.length === 0) {
     if (!input.compaction?.summary) {
       return input.nextUserMessage;
     }
-    return `Continue this forked conversation. The original thread compacted its earlier context.\n\n${formatCompactionSummary(input.compaction.summary)}\n\nNew user message:\n${input.nextUserMessage}`;
+    return `Continue this ${contextName}. The earlier provider context was compacted.\n\n${formatCompactionSummary(input.compaction.summary)}\n\nNew user message:\n${input.nextUserMessage}`;
   }
 
   const maxChars = input.maxChars ?? PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
@@ -275,7 +278,11 @@ export function buildForkBootstrapPrompt(input: {
     input.compaction !== null && input.compaction !== undefined
       ? "Transcript after compaction:\n"
       : "Transcript:\n";
-  const header = `Continue this forked conversation. The following transcript is prior context from the original thread. Treat it as already-established conversation state.\n\n${compactionPrefix}${transcriptLabel}`;
+  const contextSource =
+    promptKind === "session-restart"
+      ? "prior context from this T3 thread"
+      : "prior context from the original thread";
+  const header = `Continue this ${contextName}. The following transcript is ${contextSource}. Treat it as already-established conversation state.\n\n${compactionPrefix}${transcriptLabel}`;
   const footer = `\n\nNew user message:\n${input.nextUserMessage}`;
   const availableChars = maxChars - header.length - footer.length;
   if (availableChars < FORK_BOOTSTRAP_MIN_TRANSCRIPT_BUDGET) {

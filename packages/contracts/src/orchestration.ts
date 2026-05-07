@@ -610,6 +610,7 @@ const ThreadSessionStopCommand = Schema.Struct({
   type: Schema.Literal("thread.session.stop"),
   commandId: CommandId,
   threadId: ThreadId,
+  clearResumeCursor: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
@@ -974,6 +975,7 @@ export const ThreadRevertedPayload = Schema.Struct({
 
 export const ThreadSessionStopRequestedPayload = Schema.Struct({
   threadId: ThreadId,
+  clearResumeCursor: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 

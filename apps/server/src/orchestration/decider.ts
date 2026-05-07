@@ -640,6 +640,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.session-stop-requested",
         payload: {
           threadId: command.threadId,
+          ...(command.clearResumeCursor === true ? { clearResumeCursor: true } : {}),
           createdAt: command.createdAt,
         },
       };

@@ -329,6 +329,67 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("bootstraps a fresh provider session from existing T3 thread history", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.message.import",
+        commandId: CommandId.makeUnsafe("cmd-import-prior-user"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("prior-user-message"),
+          role: "user",
+          text: "Please redesign the alcohol calculator.",
+          attachments: [],
+          turnId: null,
+        },
+        createdAt: "2026-05-07T18:00:00.000Z",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.message.import",
+        commandId: CommandId.makeUnsafe("cmd-import-prior-assistant"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("prior-assistant-message"),
+          role: "assistant",
+          text: "I updated the result card hierarchy and ABV badge.",
+          attachments: [],
+          turnId: null,
+        },
+        createdAt: "2026-05-07T18:01:00.000Z",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-after-compact"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("new-user-message"),
+          role: "user",
+          text: "Continue with the color converter.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const sentInput = harness.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined;
+    expect(sentInput?.input).toContain("Continue this conversation.");
+    expect(sentInput?.input).toContain("prior context from this T3 thread");
+    expect(sentInput?.input).toContain("Please redesign the alcohol calculator.");
+    expect(sentInput?.input).toContain("I updated the result card hierarchy and ABV badge.");
+    expect(sentInput?.input).toContain("New user message:\nContinue with the color converter.");
+  });
+
   it("reacts to thread.reconnect-checkin by sending a hidden provider follow-up turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -1707,6 +1768,50 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.status).toBe("stopped");
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.activeTurnId).toBeNull();
+  });
+
+  it("clears the provider binding when stopping a session for compaction", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-for-compact"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "claude",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "Previous provider error",
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.makeUnsafe("cmd-session-compact"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        clearResumeCursor: true,
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    expect(harness.stopSession.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      preserveBinding: false,
+    });
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.session?.status).toBe("stopped");
+    expect(thread?.session?.providerName).toBe("claude");
+    expect(thread?.session?.lastError).toBeNull();
   });
 
   it("turns off auto mode when stopping an auto thread", async () => {
