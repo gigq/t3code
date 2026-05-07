@@ -212,6 +212,10 @@ function coalesceOrchestrationUiEvents(
 
 const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
 const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
+type ActiveThreadDetailReason = "bootstrap" | "route" | "reconnect";
+interface ActiveThreadDetailOptions {
+  readonly force?: boolean;
+}
 
 function threadIdFromPathname(pathname: string): ThreadId | null {
   const parsed = parseThreadIdFromNotificationUrlPath(pathname);
@@ -251,7 +255,7 @@ function EventRouter() {
   const disposedRef = useRef(false);
   const bootstrapFromSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
   const ensureActiveThreadDetailRef = useRef<
-    (reason: "bootstrap" | "route" | "reconnect") => Promise<void>
+    (reason: ActiveThreadDetailReason, options?: ActiveThreadDetailOptions) => Promise<void>
   >(async () => undefined);
   const serverConfig = useServerConfig();
 
@@ -486,7 +490,8 @@ function EventRouter() {
     };
 
     const ensureActiveThreadDetail = async (
-      reason: "bootstrap" | "route" | "reconnect",
+      reason: ActiveThreadDetailReason,
+      options: ActiveThreadDetailOptions = {},
     ): Promise<void> => {
       const activeThreadId = threadIdFromPathname(readPathname());
       if (activeThreadId === null) {
@@ -496,7 +501,7 @@ function EventRouter() {
       const activeThread = useStore
         .getState()
         .threads.find((thread) => thread.id === activeThreadId);
-      if (!activeThread || activeThread.detailState === "ready") {
+      if (!activeThread || (!options.force && activeThread.detailState === "ready")) {
         return;
       }
 
@@ -665,7 +670,12 @@ function EventRouter() {
             return;
           }
           flushPendingDomainEvents();
-          void runReplayRecovery("resubscribe");
+          void runReplayRecovery("resubscribe").finally(() => {
+            if (disposed) {
+              return;
+            }
+            void ensureActiveThreadDetail("reconnect", { force: true });
+          });
         },
       },
     );

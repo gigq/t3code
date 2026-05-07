@@ -601,6 +601,55 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("fires onResubscribe during explicit reconnect before any stream value arrives", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const listener = vi.fn();
+    const onResubscribe = vi.fn();
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+      { onResubscribe },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = sockets[0];
+    if (!firstSocket) {
+      throw new Error("Expected first websocket instance");
+    }
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(firstSocket.sent).toHaveLength(1);
+    });
+    expect(listener).not.toHaveBeenCalled();
+    expect(onResubscribe).not.toHaveBeenCalled();
+
+    await transport.reconnect();
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    const secondSocket = sockets[1];
+    if (!secondSocket) {
+      throw new Error("Expected second websocket instance");
+    }
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+    expect(listener).not.toHaveBeenCalled();
+    expect(onResubscribe).toHaveBeenCalledOnce();
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("rebinds active subscriptions onto the new session during reconnect", async () => {
     const transport = new WsTransport("ws://localhost:3020");
     const listener = vi.fn();

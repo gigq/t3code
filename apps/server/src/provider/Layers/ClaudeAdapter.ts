@@ -154,6 +154,7 @@ interface ClaudeSessionContext {
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
+  currentPermissionMode: PermissionMode;
   currentApiModelId: string | undefined;
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
@@ -2819,6 +2820,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
+        currentPermissionMode: permissionMode ?? "default",
         currentApiModelId: apiModelId,
         resumeSessionId: sessionId,
         pendingApprovals,
@@ -2935,17 +2937,18 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // "plan" maps directly to the SDK's "plan" permission mode;
     // "default" and "auto" restore the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === "plan") {
+    const nextPermissionMode =
+      input.interactionMode === "plan"
+        ? "plan"
+        : input.interactionMode === "default" || input.interactionMode === "auto"
+          ? (context.basePermissionMode ?? "default")
+          : undefined;
+    if (nextPermissionMode !== undefined && nextPermissionMode !== context.currentPermissionMode) {
       yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode("plan"),
+        try: () => context.query.setPermissionMode(nextPermissionMode),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
-    } else if (input.interactionMode === "default" || input.interactionMode === "auto") {
-      yield* Effect.tryPromise({
-        try: () =>
-          context.query.setPermissionMode(context.basePermissionMode ?? "bypassPermissions"),
-        catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
-      });
+      context.currentPermissionMode = nextPermissionMode;
     }
 
     const turnId = TurnId.makeUnsafe(yield* Random.nextUUIDv4);

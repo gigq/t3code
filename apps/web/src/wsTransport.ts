@@ -111,12 +111,14 @@ export class WsTransport {
     );
     let cancelCurrentStream: () => void = NOOP;
     let restartRequested = false;
+    let shouldNotifyResubscribe = false;
 
     const requestRestart = () => {
       if (!active) {
         return;
       }
       restartRequested = true;
+      shouldNotifyResubscribe = true;
       cancelCurrentStream();
     };
     this.activeSubscriptionRestarts.add(requestRestart);
@@ -127,13 +129,15 @@ export class WsTransport {
           return;
         }
 
+        let streamStarted = false;
         try {
-          if (hasReceivedValue) {
+          if (hasReceivedValue || shouldNotifyResubscribe) {
             try {
               options?.onResubscribe?.();
             } catch {
               // Swallow reconnect hook errors so the stream can recover.
             }
+            shouldNotifyResubscribe = false;
           }
 
           const session = this.session;
@@ -142,6 +146,9 @@ export class WsTransport {
             connect,
             listener,
             () => active,
+            () => {
+              streamStarted = true;
+            },
             () => {
               hasReceivedValue = true;
             },
@@ -163,6 +170,7 @@ export class WsTransport {
             continue;
           }
 
+          shouldNotifyResubscribe = streamStarted || hasReceivedValue;
           console.warn("WebSocket RPC subscription disconnected", {
             error: formatErrorMessage(error),
           });
@@ -231,6 +239,7 @@ export class WsTransport {
     connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,
     isActive: () => boolean,
+    markStreamStarted: () => void,
     markValueReceived: () => void,
   ): {
     readonly cancel: () => void;
@@ -246,19 +255,23 @@ export class WsTransport {
       Effect.promise(() => this.tracingReady).pipe(
         Effect.flatMap(() => Effect.promise(() => session.clientPromise)),
         Effect.flatMap((client) =>
-          Stream.runForEach(connect(client), (value) =>
-            Effect.sync(() => {
-              if (!isActive()) {
-                return;
-              }
+          Effect.sync(markStreamStarted).pipe(
+            Effect.flatMap(() =>
+              Stream.runForEach(connect(client), (value) =>
+                Effect.sync(() => {
+                  if (!isActive()) {
+                    return;
+                  }
 
-              markValueReceived();
-              try {
-                listener(value);
-              } catch {
-                // Swallow listener errors so the stream stays live.
-              }
-            }),
+                  markValueReceived();
+                  try {
+                    listener(value);
+                  } catch {
+                    // Swallow listener errors so the stream stays live.
+                  }
+                }),
+              ),
+            ),
           ),
         ),
       ),
