@@ -1814,6 +1814,71 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.lastError).toBeNull();
   });
 
+  it("auto-compacts auto-mode threads after provider request-too-large messages", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-auto-compact-mode-set"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        interactionMode: "auto",
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-auto-compact-session-set"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "claudeAgent",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.message.import",
+        commandId: CommandId.makeUnsafe("cmd-auto-compact-error-message"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("assistant-request-too-large"),
+          role: "assistant",
+          text: "Request too large (max 32MB). Try with a smaller file.",
+          attachments: [],
+          turnId: null,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    expect(harness.stopSession.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      preserveBinding: false,
+    });
+    await waitFor(async () => {
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const thread = readModel.threads.find(
+        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      );
+      return (
+        thread?.interactionMode === "auto" &&
+        thread.session?.status === "stopped" &&
+        thread.activities.some((activity) => activity.kind === "auto.compact.request-too-large")
+      );
+    });
+  });
+
   it("turns off auto mode when stopping an auto thread", async () => {
     vi.useFakeTimers();
     try {

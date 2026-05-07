@@ -53,6 +53,7 @@ type ProviderIntentEvent = Extract<
       | "thread.auto-defer-set"
       | "thread.runtime-mode-set"
       | "thread.session-set"
+      | "thread.message-sent"
       | "thread.turn-completed"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
@@ -154,6 +155,7 @@ const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 const DEFAULT_THREAD_TITLE = "New thread";
 const AUTO_MODE_INITIAL_WAKE_DELAY_MS = 10_000;
+const REQUEST_TOO_LARGE_MAX_32MB_PATTERN = /request too large\s*\(\s*max\s+32\s*mb\s*\)/i;
 
 function canReplaceThreadTitle(currentTitle: string, titleSeed?: string): boolean {
   const trimmedCurrentTitle = currentTitle.trim();
@@ -217,6 +219,10 @@ function isAutoThreadEligible(thread: OrchestrationThread): boolean {
     status === "interrupted" ||
     status === "error"
   );
+}
+
+function isProviderRequestTooLargeMessage(text: string): boolean {
+  return REQUEST_TOO_LARGE_MAX_32MB_PATTERN.test(text);
 }
 
 function autoWakeDelayForThread(thread: OrchestrationThread, fallbackDelayMs: number): number {
@@ -1032,6 +1038,50 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const processMessageSent = Effect.fn("processMessageSent")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.message-sent" }>,
+  ) {
+    if (
+      event.payload.role !== "assistant" ||
+      event.payload.streaming ||
+      !isProviderRequestTooLargeMessage(event.payload.text)
+    ) {
+      return;
+    }
+
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread || thread.interactionMode !== "auto") {
+      return;
+    }
+
+    yield* orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: serverCommandId("provider-auto-compact-request-too-large-activity"),
+      threadId: thread.id,
+      activity: {
+        id: EventId.makeUnsafe(`${event.eventId}:auto-compact`),
+        tone: "info",
+        kind: "auto.compact.request-too-large",
+        summary: "Auto compacting",
+        payload: {
+          reason: "provider-request-too-large",
+          message: event.payload.text,
+        },
+        turnId: event.payload.turnId,
+        createdAt: event.payload.createdAt,
+      },
+      createdAt: event.payload.createdAt,
+    });
+
+    yield* orchestrationEngine.dispatch({
+      type: "thread.session.stop",
+      commandId: serverCommandId("provider-auto-compact-request-too-large"),
+      threadId: thread.id,
+      clearResumeCursor: true,
+      createdAt: event.payload.createdAt,
+    });
+  });
+
   const processSessionStopRequested = Effect.fn("processSessionStopRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
   ) {
@@ -1041,7 +1091,8 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
-    if (thread.interactionMode === "auto") {
+    const clearResumeCursor = event.payload.clearResumeCursor === true;
+    if (thread.interactionMode === "auto" && !clearResumeCursor) {
       yield* orchestrationEngine.dispatch({
         type: "thread.interaction-mode.set",
         commandId: serverCommandId("provider-auto-stop-interaction-mode-set"),
@@ -1051,7 +1102,6 @@ const make = Effect.gen(function* () {
       });
     }
 
-    const clearResumeCursor = event.payload.clearResumeCursor === true;
     if (clearResumeCursor || (thread.session && thread.session.status !== "stopped")) {
       yield* providerService.stopSession({
         threadId: thread.id,
@@ -1148,6 +1198,9 @@ const make = Effect.gen(function* () {
         yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
         return;
       }
+      case "thread.message-sent":
+        yield* processMessageSent(event);
+        return;
       case "thread.turn-completed": {
         const thread = yield* resolveThread(event.payload.threadId);
         yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
@@ -1199,6 +1252,7 @@ const make = Effect.gen(function* () {
           event.type === "thread.auto-defer-set" ||
           event.type === "thread.runtime-mode-set" ||
           event.type === "thread.session-set" ||
+          event.type === "thread.message-sent" ||
           event.type === "thread.turn-completed" ||
           event.type === "thread.turn-start-requested" ||
           event.type === "thread.turn-interrupt-requested" ||
