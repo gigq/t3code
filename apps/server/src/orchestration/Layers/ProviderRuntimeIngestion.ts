@@ -94,6 +94,8 @@ function truncateDetail(value: string, limit = 180): string {
 
 const UI_AUTOMATION_DATA_OMISSION_REASON =
   "desktop-use/computer-use result omitted from persisted T3 history to avoid oversized thread payloads.";
+const MAX_PERSISTED_UI_AUTOMATION_SCREENSHOTS = 1;
+const MAX_PERSISTED_UI_AUTOMATION_SCREENSHOT_BASE64_CHARS = 6_000_000;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -132,6 +134,86 @@ function getLargeUiAutomationToolName(data: unknown): string | undefined {
   return tool ? `mcp__${server}__${tool}` : `mcp__${server}`;
 }
 
+function asTrimmedString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function extractToolResultContent(data: unknown): ReadonlyArray<unknown> {
+  const record = asRecord(data);
+  if (!record) {
+    return [];
+  }
+
+  const item = asRecord(record.item);
+  const result = asRecord(item?.result) ?? asRecord(record.result);
+  if (Array.isArray(result?.content)) {
+    return result.content;
+  }
+  if (Array.isArray(record.content)) {
+    return record.content;
+  }
+  return [];
+}
+
+function extractPersistableScreenshotPreviews(data: unknown): {
+  readonly screenshots: ReadonlyArray<Record<string, unknown>>;
+  readonly omittedCount: number;
+} {
+  const screenshots: Record<string, unknown>[] = [];
+  let omittedCount = 0;
+
+  for (const entry of extractToolResultContent(data)) {
+    if (screenshots.length >= MAX_PERSISTED_UI_AUTOMATION_SCREENSHOTS) {
+      omittedCount += 1;
+      continue;
+    }
+
+    const block = asRecord(entry);
+    if (!block) {
+      continue;
+    }
+
+    const type = asTrimmedString(block.type);
+    if (type === "image") {
+      const source = asRecord(block.source);
+      const base64 = asTrimmedString(block.data) ?? asTrimmedString(source?.data);
+      if (!base64) {
+        continue;
+      }
+      if (base64.length > MAX_PERSISTED_UI_AUTOMATION_SCREENSHOT_BASE64_CHARS) {
+        omittedCount += 1;
+        continue;
+      }
+      const mediaType =
+        asTrimmedString(block.media_type) ??
+        asTrimmedString(block.mimeType) ??
+        asTrimmedString(source?.media_type) ??
+        asTrimmedString(source?.mimeType) ??
+        "image/png";
+      screenshots.push({
+        type: "image",
+        mediaType,
+        data: base64,
+      });
+      continue;
+    }
+
+    if (type === "image_url") {
+      const imageUrl = asRecord(block.image_url);
+      const url = asTrimmedString(imageUrl?.url) ?? asTrimmedString(block.url);
+      if (!url) {
+        continue;
+      }
+      screenshots.push({
+        type: "image_url",
+        url,
+      });
+    }
+  }
+
+  return { screenshots, omittedCount };
+}
+
 function sanitizePersistedToolData(data: unknown): unknown {
   const uiAutomationToolName = getLargeUiAutomationToolName(data);
   if (!uiAutomationToolName) {
@@ -140,9 +222,16 @@ function sanitizePersistedToolData(data: unknown): unknown {
 
   const record = asRecord(data);
   const input = record?.input;
+  const screenshotPreviews = extractPersistableScreenshotPreviews(data);
   return {
     toolName: uiAutomationToolName,
     ...(input !== undefined ? { input } : {}),
+    ...(screenshotPreviews.screenshots.length > 0
+      ? { screenshots: screenshotPreviews.screenshots }
+      : {}),
+    ...(screenshotPreviews.omittedCount > 0
+      ? { screenshotsOmitted: screenshotPreviews.omittedCount }
+      : {}),
     resultOmitted: true,
     omissionReason: UI_AUTOMATION_DATA_OMISSION_REASON,
   };

@@ -908,6 +908,79 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("extracts screenshot previews from sanitized Claude desktop-use tool payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-desktop-tool-with-screenshot",
+        kind: "tool.completed",
+        summary: "MCP tool call",
+        payload: {
+          itemType: "mcp_tool_call",
+          title: "MCP tool call",
+          data: {
+            toolName: "mcp__desktop-use__get_app_state",
+            screenshots: [
+              {
+                type: "image",
+                mediaType: "image/png",
+                data: "Y2xhdWRlLXBuZw==",
+              },
+            ],
+            resultOmitted: true,
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.toolTitle).toBe("mcp desktop use get app state");
+    expect(entry?.screenshots).toEqual([
+      {
+        id: "claude-desktop-tool-with-screenshot:screenshot:1",
+        name: "mcp__desktop-use__get_app_state screenshot 1",
+        previewUrl: "data:image/png;base64,Y2xhdWRlLXBuZw==",
+      },
+    ]);
+  });
+
+  it("extracts Claude source-shaped image blocks from raw tool payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-raw-tool-with-screenshot",
+        kind: "tool.completed",
+        summary: "MCP tool call",
+        payload: {
+          itemType: "mcp_tool_call",
+          title: "MCP tool call",
+          data: {
+            toolName: "mcp__desktop-use__get_app_state",
+            result: {
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "cmF3LWNsYXVkZS1wbmc=",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.screenshots).toEqual([
+      {
+        id: "claude-raw-tool-with-screenshot:screenshot:1",
+        name: "mcp__desktop-use__get_app_state screenshot 1",
+        previewUrl: "data:image/png;base64,cmF3LWNsYXVkZS1wbmc=",
+      },
+    ]);
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

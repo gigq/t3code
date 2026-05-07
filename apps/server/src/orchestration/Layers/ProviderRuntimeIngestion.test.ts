@@ -3318,7 +3318,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(item?.server).toBe("filesystem");
   });
 
-  it("omits desktop-use MCP result payloads from projected thread activities", async () => {
+  it("omits desktop-use MCP result payloads while preserving a bounded screenshot preview", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -3343,7 +3343,11 @@ describe("ProviderRuntimeIngestion", () => {
             content: [
               {
                 type: "image",
-                data: "ZmFrZS1wbmc=",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: "ZmFrZS1wbmc=",
+                },
               },
             ],
           },
@@ -3373,6 +3377,13 @@ describe("ProviderRuntimeIngestion", () => {
     expect(data?.toolName).toBe("mcp__desktop-use__get_app_state");
     expect(data?.resultOmitted).toBe(true);
     expect(data?.result).toBeUndefined();
+    expect(data?.screenshots).toEqual([
+      {
+        type: "image",
+        mediaType: "image/png",
+        data: "ZmFrZS1wbmc=",
+      },
+    ]);
   });
 
   it("projects context window updates into normalized thread activities", async () => {

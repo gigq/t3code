@@ -947,11 +947,13 @@ function extractToolScreenshots(
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const result = asRecord(item?.result) ?? asRecord(data?.result);
-  const content = Array.isArray(result?.content)
-    ? result.content
-    : Array.isArray(data?.content)
-      ? data.content
-      : null;
+  const content = Array.isArray(data?.screenshots)
+    ? data.screenshots
+    : Array.isArray(result?.content)
+      ? result.content
+      : Array.isArray(data?.content)
+        ? data.content
+        : null;
   if (!content) {
     return [];
   }
@@ -967,13 +969,19 @@ function extractToolScreenshots(
 
       const type = asTrimmedString(block.type);
       if (type === "image") {
-        const base64 = asTrimmedString(block.data);
+        const source = asRecord(block.source);
+        const base64 = asTrimmedString(block.data) ?? asTrimmedString(source?.data);
         if (!base64) {
           return null;
         }
         screenshotIndex += 1;
         const mimeType =
-          asTrimmedString(block.media_type) ?? asTrimmedString(block.mimeType) ?? "image/png";
+          asTrimmedString(block.mediaType) ??
+          asTrimmedString(block.media_type) ??
+          asTrimmedString(block.mimeType) ??
+          asTrimmedString(source?.media_type) ??
+          asTrimmedString(source?.mimeType) ??
+          "image/png";
         return {
           id: `${activityId}:screenshot:${screenshotIndex}`,
           name: `${toolName} screenshot ${screenshotIndex}`,
