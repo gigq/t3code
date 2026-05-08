@@ -212,9 +212,20 @@ function coalesceOrchestrationUiEvents(
 
 const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
 const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
+const THREAD_HISTORY_RECONNECT_RETRY_COOLDOWN_MS = 8_000;
+const THREAD_HISTORY_FAILURE_TOAST_UPDATE_COOLDOWN_MS = 1_000;
 type ActiveThreadDetailReason = "bootstrap" | "route" | "reconnect";
 interface ActiveThreadDetailOptions {
   readonly force?: boolean;
+  readonly manual?: boolean;
+}
+
+function describeError(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function isTransientThreadHistoryLoadError(message: string): boolean {
+  return /SocketReadError|WebSocket|socket|network|during Read/i.test(message);
 }
 
 function threadIdFromPathname(pathname: string): ThreadId | null {
@@ -377,6 +388,11 @@ function EventRouter() {
     let needsProviderInvalidation = false;
     const pendingDomainEvents: OrchestrationEvent[] = [];
     let flushPendingDomainEventsScheduled = false;
+    let threadHistoryFailureToastId: ReturnType<typeof toastManager.add> | null = null;
+    let threadHistoryFailureToastKey: string | null = null;
+    let threadHistoryFailureCount = 0;
+    let threadHistoryFailureLastToastAtMs = 0;
+    const threadHistoryReconnectRetryAfterMs = new Map<string, number>();
 
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
@@ -488,6 +504,82 @@ function EventRouter() {
       flushPendingDomainEventsScheduled = true;
       queueMicrotask(flushPendingDomainEvents);
     };
+    const clearThreadHistoryFailureToast = (threadId: ThreadId) => {
+      threadHistoryReconnectRetryAfterMs.delete(threadId);
+      if (
+        !threadHistoryFailureToastId ||
+        !threadHistoryFailureToastKey?.startsWith(`${threadId}:`)
+      ) {
+        return;
+      }
+
+      toastManager.close(threadHistoryFailureToastId);
+      threadHistoryFailureToastId = null;
+      threadHistoryFailureToastKey = null;
+      threadHistoryFailureCount = 0;
+      threadHistoryFailureLastToastAtMs = 0;
+    };
+    const showThreadHistoryFailureToast = ({
+      description,
+      reason,
+      threadId,
+    }: {
+      readonly description: string;
+      readonly reason: ActiveThreadDetailReason;
+      readonly threadId: ThreadId;
+    }) => {
+      const nowMs = Date.now();
+      const key = `${threadId}:${description}`;
+      if (threadHistoryFailureToastKey === key) {
+        threadHistoryFailureCount += 1;
+        if (
+          threadHistoryFailureToastId &&
+          nowMs - threadHistoryFailureLastToastAtMs <
+            THREAD_HISTORY_FAILURE_TOAST_UPDATE_COOLDOWN_MS
+        ) {
+          return;
+        }
+      } else {
+        threadHistoryFailureToastKey = key;
+        threadHistoryFailureCount = 1;
+      }
+
+      const retryPaused =
+        reason === "reconnect" &&
+        threadHistoryReconnectRetryAfterMs.has(threadId) &&
+        isTransientThreadHistoryLoadError(description);
+      const retrySuffix = retryPaused
+        ? " Automatic reconnect history loads are paused briefly."
+        : "";
+      const repeatSuffix =
+        threadHistoryFailureCount > 1
+          ? ` Collapsed ${threadHistoryFailureCount} failed attempts.`
+          : "";
+      const toastPayload = {
+        type: "warning" as const,
+        title: "Failed to load thread history",
+        description: `${description}${retrySuffix}${repeatSuffix}`,
+        timeout: 0,
+        data: {
+          threadId,
+        },
+        actionProps: {
+          children: "Retry",
+          onClick: () => {
+            threadHistoryReconnectRetryAfterMs.delete(threadId);
+            clearThreadHistoryFailureToast(threadId);
+            void ensureActiveThreadDetail("route", { force: true, manual: true });
+          },
+        },
+      };
+
+      if (threadHistoryFailureToastId) {
+        toastManager.update(threadHistoryFailureToastId, toastPayload);
+      } else {
+        threadHistoryFailureToastId = toastManager.add(toastPayload);
+      }
+      threadHistoryFailureLastToastAtMs = nowMs;
+    };
 
     const ensureActiveThreadDetail = async (
       reason: ActiveThreadDetailReason,
@@ -505,6 +597,13 @@ function EventRouter() {
         return;
       }
 
+      if (reason === "reconnect" && !options.manual) {
+        const retryAfterMs = threadHistoryReconnectRetryAfterMs.get(activeThreadId) ?? 0;
+        if (Date.now() < retryAfterMs) {
+          return;
+        }
+      }
+
       if (activeThreadDetailRequest && activeThreadDetailTarget === activeThreadId) {
         return activeThreadDetailRequest;
       }
@@ -519,6 +618,7 @@ function EventRouter() {
           }
           syncThreadSnapshot(snapshot);
           if (snapshot.thread !== null) {
+            clearThreadHistoryFailureToast(activeThreadId);
             reconcileSnapshotDerivedState();
           } else {
             setThreadDetailState(activeThreadId, "error");
@@ -529,13 +629,17 @@ function EventRouter() {
             return;
           }
           setThreadDetailState(activeThreadId, "error");
-          toastManager.add({
-            type: "warning",
-            title: "Failed to load thread history",
-            description:
-              error instanceof Error
-                ? error.message
-                : `Unable to load thread detail after ${reason}.`,
+          const description = describeError(error, `Unable to load thread detail after ${reason}.`);
+          if (reason === "reconnect" && isTransientThreadHistoryLoadError(description)) {
+            threadHistoryReconnectRetryAfterMs.set(
+              activeThreadId,
+              Date.now() + THREAD_HISTORY_RECONNECT_RETRY_COOLDOWN_MS,
+            );
+          }
+          showThreadHistoryFailureToast({
+            description,
+            reason,
+            threadId: activeThreadId,
           });
         })
         .finally(() => {

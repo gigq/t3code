@@ -28,6 +28,8 @@ export type ThreadToastData = {
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
 const anchoredToastManager = Toast.createToastManager<ThreadToastData>();
+type ToastPayload = Parameters<typeof toastManager.add>[0];
+type ToastActionProps = NonNullable<ToastPayload["actionProps"]>;
 type ToastId = ReturnType<typeof toastManager.add>;
 const threadToastVisibleTimeoutRemainingMs = new Map<ToastId, number>();
 
@@ -55,6 +57,20 @@ function CopyErrorButton({ text }: { text: string }) {
         <CopyIcon className="size-3.5" />
       )}
     </button>
+  );
+}
+
+function ToastActionButton({ actionProps }: { actionProps: ToastActionProps }) {
+  const { children, className, ...props } = actionProps;
+
+  return (
+    <Toast.Action
+      {...props}
+      className={cn(buttonVariants({ size: "xs" }), "shrink-0", className)}
+      data-slot="toast-action"
+    >
+      {children}
+    </Toast.Action>
   );
 }
 
@@ -322,14 +338,7 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                     />
                   </div>
                 </div>
-                {toast.actionProps && (
-                  <Toast.Action
-                    className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                    data-slot="toast-action"
-                  >
-                    {toast.actionProps.children}
-                  </Toast.Action>
-                )}
+                {toast.actionProps && <ToastActionButton actionProps={toast.actionProps} />}
               </Toast.Content>
             </Toast.Root>
           );
@@ -418,14 +427,7 @@ function AnchoredToasts() {
                           />
                         </div>
                       </div>
-                      {toast.actionProps && (
-                        <Toast.Action
-                          className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                          data-slot="toast-action"
-                        >
-                          {toast.actionProps.children}
-                        </Toast.Action>
-                      )}
+                      {toast.actionProps && <ToastActionButton actionProps={toast.actionProps} />}
                     </Toast.Content>
                   )}
                 </Toast.Root>
