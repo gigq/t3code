@@ -43,6 +43,14 @@ export function buildSshArgs(
 ): ReadonlyArray<string> {
   return [
     options?.allocateTty === true ? "-tt" : "-T",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=10",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
     ...(location.port !== undefined ? ["-p", String(location.port)] : []),
     location.host,
     `exec /bin/sh -lc ${shellQuote(remoteShellCommand)}`,

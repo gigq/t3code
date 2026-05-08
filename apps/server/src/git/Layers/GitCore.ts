@@ -714,6 +714,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         const child = yield* commandSpawner
           .spawn(childProcess)
           .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));
+        yield* Effect.addFinalizer(() =>
+          child.kill({ killSignal: "SIGTERM", forceKillAfter: "1 second" }).pipe(Effect.ignore),
+        );
 
         const [stdout, stderr, exitCode] = yield* Effect.all(
           [
