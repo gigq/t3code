@@ -35,6 +35,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Equal } from "effect";
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -1187,6 +1188,46 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => createModelSelection(selectedProvider, selectedModel, selectedModelOptionsForDispatch),
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
+  const lastModelSelectionPersistCommandKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isServerThread || !activeThread) {
+      lastModelSelectionPersistCommandKeyRef.current = null;
+      return;
+    }
+    if (Equal.equals(activeThread.modelSelection, selectedModelSelection)) {
+      lastModelSelectionPersistCommandKeyRef.current = null;
+      return;
+    }
+    const api = readNativeApi();
+    if (!api) {
+      return;
+    }
+    const commandKey = JSON.stringify({
+      threadId: activeThread.id,
+      modelSelection: selectedModelSelection,
+    });
+    if (lastModelSelectionPersistCommandKeyRef.current === commandKey) {
+      return;
+    }
+    lastModelSelectionPersistCommandKeyRef.current = commandKey;
+    void api.orchestration
+      .dispatchCommand({
+        type: "thread.meta.update",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        modelSelection: selectedModelSelection,
+      })
+      .catch((error) => {
+        if (lastModelSelectionPersistCommandKeyRef.current === commandKey) {
+          lastModelSelectionPersistCommandKeyRef.current = null;
+        }
+        toastManager.add({
+          type: "warning",
+          title: "Could not save model selection",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      });
+  }, [activeThread, isServerThread, selectedModelSelection]);
   const selectedModelForPicker = selectedModel;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;

@@ -660,6 +660,72 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("uses persisted model selection updates for later turns without an explicit selection", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const updatedModelSelection: ModelSelection = {
+      provider: "codex",
+      model: "gpt-5.3-codex",
+      options: {
+        reasoningEffort: "high",
+        fastMode: false,
+      },
+    };
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-before-model-update"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-before-model-update"),
+          role: "user",
+          text: "start session",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    harness.sendTurn.mockClear();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-thread-model-update"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        modelSelection: updatedModelSelection,
+      }),
+    );
+    await harness.drain();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-after-model-update"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-after-model-update"),
+          role: "user",
+          text: "continue with updated selection",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      modelSelection: updatedModelSelection,
+    });
+  });
+
   it("forwards claude effort options through session start and turn send", async () => {
     const harness = await createHarness({
       threadModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },

@@ -749,6 +749,97 @@ function tryParseJsonRecord(value: string): Record<string, unknown> | undefined 
   }
 }
 
+function recordString(
+  record: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function normalizeAskUserQuestionAnswer(
+  value: unknown,
+): string | ReadonlyArray<string> | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const answers = value.filter((entry): entry is string => typeof entry === "string");
+    return answers.length > 0 ? answers : undefined;
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const answers = (value as { readonly answers?: unknown }).answers;
+    if (Array.isArray(answers)) {
+      const normalized = answers.filter((entry): entry is string => typeof entry === "string");
+      return normalized.length > 0 ? normalized : undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function lookupAskUserQuestionAnswer(
+  answers: ProviderUserInputAnswers,
+  keys: ReadonlyArray<string | undefined>,
+): string | ReadonlyArray<string> | undefined {
+  const seen = new Set<string>();
+  for (const key of keys) {
+    if (!key || key.trim().length === 0 || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    if (!Object.prototype.hasOwnProperty.call(answers, key)) {
+      continue;
+    }
+    const answer = normalizeAskUserQuestionAnswer(answers[key]);
+    if (answer !== undefined) {
+      return answer;
+    }
+  }
+  return undefined;
+}
+
+function toClaudeAskUserQuestionAnswers(input: {
+  readonly questions: ReadonlyArray<UserInputQuestion>;
+  readonly rawQuestions: ReadonlyArray<unknown>;
+  readonly answers: ProviderUserInputAnswers;
+}): Record<string, string | ReadonlyArray<string>> {
+  const sdkAnswers: Record<string, string | ReadonlyArray<string>> = {};
+
+  input.questions.forEach((question, index) => {
+    const rawQuestion =
+      input.rawQuestions[index] && typeof input.rawQuestions[index] === "object"
+        ? (input.rawQuestions[index] as Record<string, unknown>)
+        : undefined;
+    const questionText = question.question.trim();
+    const header = question.header.trim();
+    const id = question.id.trim();
+    const rawQuestionText = recordString(rawQuestion, "question");
+    const rawHeader = recordString(rawQuestion, "header");
+    const rawId = recordString(rawQuestion, "id");
+    const answer = lookupAskUserQuestionAnswer(input.answers, [
+      id,
+      header,
+      questionText,
+      rawId,
+      rawHeader,
+      rawQuestionText,
+    ]);
+    if (answer === undefined) {
+      return;
+    }
+
+    const sdkKey = questionText || rawQuestionText || header || rawHeader || id || rawId;
+    if (sdkKey) {
+      sdkAnswers[sdkKey] = answer;
+    }
+  });
+
+  return sdkAnswers;
+}
+
 function makeRemoteClaudeSpawn(input: {
   readonly host: string;
   readonly port?: number | undefined;
@@ -2552,11 +2643,16 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
         // Return the answers to the SDK in the expected format:
         // { questions: [...], answers: { questionText: selectedLabel } }
+        const sdkAnswers = toClaudeAskUserQuestionAnswers({
+          questions,
+          rawQuestions,
+          answers,
+        });
         return {
           behavior: "allow",
           updatedInput: {
             questions: toolInput.questions,
-            answers,
+            answers: sdkAnswers,
           },
         } satisfies PermissionResult;
       });

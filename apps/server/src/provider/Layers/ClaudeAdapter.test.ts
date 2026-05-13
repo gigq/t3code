@@ -2854,7 +2854,7 @@ describe("ClaudeAdapterLive", () => {
       yield* adapter.respondToUserInput(
         session.threadId,
         ApprovalRequestId.makeUnsafe(requestId!),
-        { "Which framework?": "React" },
+        { Framework: "React" },
       );
 
       // The adapter should emit a user-input.resolved event.
@@ -2868,7 +2868,7 @@ describe("ClaudeAdapterLive", () => {
         return;
       }
       assert.deepEqual(resolvedEvent.value.payload.answers, {
-        "Which framework?": "React",
+        Framework: "React",
       });
       assert.deepEqual(resolvedEvent.value.providerRefs, {
         providerItemId: ProviderItemId.makeUnsafe("tool-ask-1"),
@@ -2941,7 +2941,7 @@ describe("ClaudeAdapterLive", () => {
       yield* adapter.respondToUserInput(
         session.threadId,
         ApprovalRequestId.makeUnsafe(requestId!),
-        { "Deploy to which env?": "Staging" },
+        { Env: "Staging" },
       );
 
       // Drain the resolved event.

@@ -52,6 +52,7 @@ type ProviderIntentEvent = Extract<
       | "thread.interaction-mode-set"
       | "thread.auto-defer-set"
       | "thread.runtime-mode-set"
+      | "thread.meta-updated"
       | "thread.session-set"
       | "thread.message-sent"
       | "thread.turn-completed"
@@ -612,7 +613,7 @@ const make = Effect.gen(function* () {
               model: activeSession.model,
             }
           : requestedModelSelection
-        : input.modelSelection;
+        : requestedModelSelection;
 
     yield* providerService.sendTurn({
       threadId: input.threadId,
@@ -1193,6 +1194,23 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      case "thread.meta-updated": {
+        if (event.payload.modelSelection === undefined) {
+          return;
+        }
+        const thread = yield* resolveThread(event.payload.threadId);
+        if (!thread) {
+          threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
+          return;
+        }
+        if (thread.session && thread.session.status !== "stopped") {
+          yield* ensureSessionForThread(event.payload.threadId, event.occurredAt, {
+            modelSelection: event.payload.modelSelection,
+          });
+        }
+        threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
+        return;
+      }
       case "thread.session-set": {
         const thread = yield* resolveThread(event.payload.threadId);
         yield* syncAutoWakeForThread(thread, AUTO_MODE_WAKE_DELAY_MS, event.type);
@@ -1251,6 +1269,7 @@ const make = Effect.gen(function* () {
           event.type === "thread.interaction-mode-set" ||
           event.type === "thread.auto-defer-set" ||
           event.type === "thread.runtime-mode-set" ||
+          event.type === "thread.meta-updated" ||
           event.type === "thread.session-set" ||
           event.type === "thread.message-sent" ||
           event.type === "thread.turn-completed" ||
