@@ -120,6 +120,13 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     binaryDescription: "Path to the Claude binary",
   },
   {
+    provider: "claudePty",
+    title: "Claude PTY",
+    binaryPlaceholder: "Claude binary path",
+    binaryDescription:
+      "Experimental interactive Claude terminal mode. Lower integration than Claude Agent SDK.",
+  },
+  {
     provider: "copilot",
     title: "Copilot",
     binaryPlaceholder: "Copilot binary path",
@@ -561,6 +568,13 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
       settings.providers.claudeAgent.customModels.length > 0,
     ),
+    claudePty: Boolean(
+      settings.providers.claudePty.enabled !==
+        DEFAULT_UNIFIED_SETTINGS.providers.claudePty.enabled ||
+      settings.providers.claudePty.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.claudePty.binaryPath ||
+      settings.providers.claudePty.customModels.length > 0,
+    ),
     copilot: Boolean(
       settings.providers.copilot.binaryPath !==
         DEFAULT_UNIFIED_SETTINGS.providers.copilot.binaryPath ||
@@ -581,6 +595,7 @@ export function GeneralSettingsPanel() {
   >({
     codex: "",
     claudeAgent: "",
+    claudePty: "",
     copilot: "",
     opencode: "",
   });
@@ -1132,7 +1147,11 @@ export function GeneralSettingsPanel() {
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onProviderModelChange={(provider, model) => {
-                  if (provider === "copilot" || provider === "opencode") {
+                  if (
+                    provider === "copilot" ||
+                    provider === "opencode" ||
+                    provider === "claudePty"
+                  ) {
                     return;
                   }
                   const nextSelection =

@@ -33,6 +33,7 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
 const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
   codex: OpenAI,
   claudeAgent: ClaudeAI,
+  claudePty: ClaudeAI,
   copilot: GitHubIcon,
   opencode: OpenCodeIcon,
   cursor: CursorIcon,
@@ -46,7 +47,9 @@ function providerIconClassName(
   provider: ProviderKind | ProviderPickerKind,
   fallbackClassName: string,
 ): string {
-  return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
+  return provider === "claudeAgent" || provider === "claudePty"
+    ? "text-[#d97757]"
+    : fallbackClassName;
 }
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {

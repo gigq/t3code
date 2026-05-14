@@ -25,6 +25,7 @@ function decodeProviderKind(
   if (
     providerName === "codex" ||
     providerName === "claudeAgent" ||
+    providerName === "claudePty" ||
     providerName === "copilot" ||
     providerName === "opencode"
   ) {

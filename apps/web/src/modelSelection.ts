@@ -46,6 +46,14 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  claudePty: {
+    provider: "claudePty",
+    title: "Claude PTY",
+    description:
+      "Save additional experimental Claude PTY model slugs for the picker and `/model` command.",
+    placeholder: "your-claude-model-slug",
+    example: "claude-sonnet-5-0",
+  },
   copilot: {
     provider: "copilot",
     title: "Copilot",
@@ -179,6 +187,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
+    ),
+    claudePty: getAppModelOptions(
+      settings,
+      providers,
+      "claudePty",
+      selectedProvider === "claudePty" ? selectedModel : undefined,
     ),
     copilot: getAppModelOptions(
       settings,

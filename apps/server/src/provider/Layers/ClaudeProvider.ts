@@ -30,7 +30,7 @@ import { ClaudeProvider } from "../Services/ClaudeProvider";
 import { ServerSettingsService } from "../../serverSettings";
 import { ServerSettingsError } from "@t3tools/contracts";
 
-const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = {
+export const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = {
   reasoningEffortLevels: [],
   supportsFastMode: false,
   supportsThinkingToggle: false,
@@ -39,7 +39,7 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = {
 };
 
 const PROVIDER = "claudeAgent" as const;
-const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
+export const CLAUDE_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: "claude-opus-4-7",
     name: "Claude Opus 4.7",
@@ -99,7 +99,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
 export function getClaudeModelCapabilities(model: string | null | undefined): ModelCapabilities {
   const slug = model?.trim();
   return (
-    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
+    CLAUDE_BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
     DEFAULT_CLAUDE_MODEL_CAPABILITIES
   );
 }
@@ -527,7 +527,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   );
   const checkedAt = new Date().toISOString();
   const models = providerModelsFromSettings(
-    BUILT_IN_MODELS,
+    CLAUDE_BUILT_IN_MODELS,
     PROVIDER,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,

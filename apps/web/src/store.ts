@@ -900,6 +900,7 @@ function toLegacyProvider(providerName: string | null): ProviderKind {
   if (
     providerName === "codex" ||
     providerName === "claudeAgent" ||
+    providerName === "claudePty" ||
     providerName === "copilot" ||
     providerName === "opencode"
   ) {

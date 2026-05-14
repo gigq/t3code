@@ -132,6 +132,7 @@ export function normalizeProviderModelOptionsWithCapabilities(
     case "codex":
       return normalizeCodexModelOptionsWithCapabilities(caps, modelOptions as CodexModelOptions);
     case "claudeAgent":
+    case "claudePty":
       return normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions as ClaudeModelOptions);
     case "copilot":
       return normalizeCopilotModelOptionsWithCapabilities(
@@ -243,6 +244,7 @@ export function createModelSelection(
         ...(options ? { options: options as CodexModelOptions } : {}),
       };
     case "claudeAgent":
+    case "claudePty":
       return {
         provider,
         model,
@@ -265,8 +267,9 @@ export function createModelSelection(
 
 export function resolveApiModelId(modelSelection: ModelSelection): string {
   switch (modelSelection.provider) {
-    case "claudeAgent": {
-      const resolvedModel = resolveModelSlug(modelSelection.model, "claudeAgent");
+    case "claudeAgent":
+    case "claudePty": {
+      const resolvedModel = resolveModelSlug(modelSelection.model, modelSelection.provider);
       switch (modelSelection.options?.contextWindow) {
         case "1m":
           return `${resolvedModel}[1m]`;

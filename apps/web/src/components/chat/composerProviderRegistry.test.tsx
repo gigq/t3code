@@ -24,8 +24,8 @@ const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
 
 const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
+    slug: "claude-opus-4-7",
+    name: "Claude Opus 4.7",
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
@@ -73,8 +73,8 @@ const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
 
 const CLAUDE_MODELS_WITH_CONTEXT_WINDOW: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
+    slug: "claude-opus-4-7",
+    name: "Claude Opus 4.7",
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
@@ -288,7 +288,7 @@ describe("getComposerProviderState", () => {
   it("preserves Claude fast mode when it is the only active option", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-7",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -311,7 +311,7 @@ describe("getComposerProviderState", () => {
   it("preserves Claude default effort explicitly in dispatch options", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-7",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -337,7 +337,7 @@ describe("getComposerProviderState", () => {
     // fastMode: false, which meant deepMerge could never clear a previous true.
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-7",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -372,7 +372,7 @@ describe("getComposerProviderState", () => {
   it("preserves Claude default context window explicitly in dispatch options", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-7",
       models: CLAUDE_MODELS_WITH_CONTEXT_WINDOW,
       prompt: "",
       modelOptions: {
@@ -394,7 +394,7 @@ describe("getComposerProviderState", () => {
     // deepMerge can clear an older non-default 1m selection.
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-7",
       models: CLAUDE_MODELS_WITH_CONTEXT_WINDOW,
       prompt: "",
       modelOptions: {

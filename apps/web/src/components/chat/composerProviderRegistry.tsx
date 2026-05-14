@@ -145,6 +145,9 @@ function createProviderRegistryEntry(
 const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
   codex: createProviderRegistryEntry("codex"),
   claudeAgent: createProviderRegistryEntry("claudeAgent"),
+  claudePty: createProviderRegistryEntry("claudePty", {
+    showInteractionModeToggle: false,
+  }),
   copilot: {
     controls: DEFAULT_PROVIDER_CONTROLS,
     getState: (input) => getProviderStateFromCapabilities(input),

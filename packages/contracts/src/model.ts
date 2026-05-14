@@ -41,6 +41,7 @@ export type OpenCodeModelOptions = typeof OpenCodeModelOptions.Type;
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
+  claudePty: Schema.optional(ClaudeModelOptions),
   copilot: Schema.optional(CopilotModelOptions),
   opencode: Schema.optional(OpenCodeModelOptions),
 });
@@ -74,6 +75,7 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
+  claudePty: "claude-sonnet-4-6",
   copilot: "default",
   opencode: "openai/gpt-5",
 };
@@ -81,7 +83,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 
 /** Per-provider text generation model defaults. */
-export type GitTextGenerationProviderKind = Exclude<ProviderKind, "copilot">;
+export type GitTextGenerationProviderKind = Exclude<ProviderKind, "copilot" | "claudePty">;
 
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<
   GitTextGenerationProviderKind,
@@ -119,6 +121,24 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "claude-haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",
   },
+  claudePty: {
+    opus: "claude-opus-4-7",
+    "opus-4.7": "claude-opus-4-7",
+    "claude-opus-4.7": "claude-opus-4-7",
+    "claude-opus-4-7-20260121": "claude-opus-4-7",
+    "opus-4.6": "claude-opus-4-7",
+    "claude-opus-4.6": "claude-opus-4-7",
+    "claude-opus-4-6": "claude-opus-4-7",
+    "claude-opus-4-6-20251117": "claude-opus-4-7",
+    sonnet: "claude-sonnet-4-6",
+    "sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4-6-20251117": "claude-sonnet-4-6",
+    haiku: "claude-haiku-4-5",
+    "haiku-4.5": "claude-haiku-4-5",
+    "claude-haiku-4.5": "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001": "claude-haiku-4-5",
+  },
   copilot: {},
   opencode: {},
 };
@@ -128,6 +148,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
 export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
+  claudePty: "Claude PTY",
   copilot: "Copilot",
   opencode: "OpenCode",
 };

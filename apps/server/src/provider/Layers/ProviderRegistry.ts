@@ -7,11 +7,14 @@ import type { ProviderKind, ServerProvider } from "@t3tools/contracts";
 import { Effect, Equal, Layer, PubSub, Ref, Stream } from "effect";
 
 import { ClaudeProviderLive } from "./ClaudeProvider";
+import { ClaudePtyProviderLive } from "./ClaudePtyProvider";
 import { CopilotProviderLive } from "./CopilotProvider";
 import { CodexProviderLive } from "./CodexProvider";
 import { OpenCodeProviderLive } from "./OpenCodeProvider";
 import type { ClaudeProviderShape } from "../Services/ClaudeProvider";
 import { ClaudeProvider } from "../Services/ClaudeProvider";
+import type { ClaudePtyProviderShape } from "../Services/ClaudePtyProvider";
+import { ClaudePtyProvider } from "../Services/ClaudePtyProvider";
 import type { CopilotProviderShape } from "../Services/CopilotProvider";
 import { CopilotProvider } from "../Services/CopilotProvider";
 import type { CodexProviderShape } from "../Services/CodexProvider";
@@ -23,6 +26,7 @@ import { ProviderRegistry, type ProviderRegistryShape } from "../Services/Provid
 const loadProviders = (
   codexProvider: CodexProviderShape,
   claudeProvider: ClaudeProviderShape,
+  claudePtyProvider: ClaudePtyProviderShape,
   copilotProvider: CopilotProviderShape,
   openCodeProvider: OpenCodeProviderShape,
 ): Effect.Effect<ReadonlyArray<ServerProvider>> =>
@@ -30,6 +34,7 @@ const loadProviders = (
     [
       codexProvider.getSnapshot,
       claudeProvider.getSnapshot,
+      claudePtyProvider.getSnapshot,
       copilotProvider.getSnapshot,
       openCodeProvider.getSnapshot,
     ],
@@ -48,6 +53,7 @@ export const ProviderRegistryLive = Layer.effect(
   Effect.gen(function* () {
     const codexProvider = yield* CodexProvider;
     const claudeProvider = yield* ClaudeProvider;
+    const claudePtyProvider = yield* ClaudePtyProvider;
     const copilotProvider = yield* CopilotProvider;
     const openCodeProvider = yield* OpenCodeProvider;
     const changesPubSub = yield* Effect.acquireRelease(
@@ -55,7 +61,13 @@ export const ProviderRegistryLive = Layer.effect(
       PubSub.shutdown,
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(
-      yield* loadProviders(codexProvider, claudeProvider, copilotProvider, openCodeProvider),
+      yield* loadProviders(
+        codexProvider,
+        claudeProvider,
+        claudePtyProvider,
+        copilotProvider,
+        openCodeProvider,
+      ),
     );
 
     const syncProviders = Effect.fn("syncProviders")(function* (options?: {
@@ -65,6 +77,7 @@ export const ProviderRegistryLive = Layer.effect(
       const providers = yield* loadProviders(
         codexProvider,
         claudeProvider,
+        claudePtyProvider,
         copilotProvider,
         openCodeProvider,
       );
@@ -83,6 +96,9 @@ export const ProviderRegistryLive = Layer.effect(
     yield* Stream.runForEach(claudeProvider.streamChanges, () => syncProviders()).pipe(
       Effect.forkScoped,
     );
+    yield* Stream.runForEach(claudePtyProvider.streamChanges, () => syncProviders()).pipe(
+      Effect.forkScoped,
+    );
     yield* Stream.runForEach(copilotProvider.streamChanges, () => syncProviders()).pipe(
       Effect.forkScoped,
     );
@@ -98,6 +114,9 @@ export const ProviderRegistryLive = Layer.effect(
         case "claudeAgent":
           yield* claudeProvider.refresh;
           break;
+        case "claudePty":
+          yield* claudePtyProvider.refresh;
+          break;
         case "copilot":
           yield* copilotProvider.refresh;
           break;
@@ -109,6 +128,7 @@ export const ProviderRegistryLive = Layer.effect(
             [
               codexProvider.refresh,
               claudeProvider.refresh,
+              claudePtyProvider.refresh,
               copilotProvider.refresh,
               openCodeProvider.refresh,
             ],
@@ -139,6 +159,7 @@ export const ProviderRegistryLive = Layer.effect(
 ).pipe(
   Layer.provideMerge(CodexProviderLive),
   Layer.provideMerge(ClaudeProviderLive),
+  Layer.provideMerge(ClaudePtyProviderLive),
   Layer.provideMerge(CopilotProviderLive),
   Layer.provideMerge(OpenCodeProviderLive),
 );

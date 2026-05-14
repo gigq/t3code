@@ -197,6 +197,32 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
   }),
 );
 
+it.effect("accepts Claude PTY model selections in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-pty",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-pty",
+        role: "user",
+        text: "hello",
+        attachments: [],
+      },
+      modelSelection: {
+        provider: "claudePty",
+        model: "claude-sonnet-4-6",
+        options: { effort: "high" },
+      },
+      runtimeMode: "full-access",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.modelSelection?.provider, "claudePty");
+    assert.strictEqual(parsed.modelSelection?.model, "claude-sonnet-4-6");
+  }),
+);
+
 it.effect("accepts bootstrap metadata in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({

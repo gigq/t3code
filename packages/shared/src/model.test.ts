@@ -52,6 +52,7 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("5.5")).toBe("gpt-5.5");
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
+    expect(normalizeModelSlug("sonnet", "claudePty")).toBe("claude-sonnet-4-6");
     expect(normalizeModelSlug("claude-opus-4-6", "claudeAgent")).toBe("claude-opus-4-7");
     expect(normalizeModelSlug("copilot/claude-opus-4.6", "opencode")).toBe(
       "github-copilot/claude-opus-4.6",
@@ -229,6 +230,16 @@ describe("resolveApiModelId", () => {
     expect(
       resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
     ).toBe("claude-opus-4-7");
+  });
+
+  it("resolves Claude PTY models with Claude aliases and context windows", () => {
+    expect(
+      resolveApiModelId({
+        provider: "claudePty",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe("claude-opus-4-7[1m]");
   });
 
   it("returns the model as-is for Codex selections", () => {

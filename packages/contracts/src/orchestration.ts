@@ -34,7 +34,13 @@ export const ORCHESTRATION_WS_METHODS = {
   replayEvents: "orchestration.replayEvents",
 } as const;
 
-export const ProviderKind = Schema.Literals(["codex", "claudeAgent", "copilot", "opencode"]);
+export const ProviderKind = Schema.Literals([
+  "codex",
+  "claudeAgent",
+  "claudePty",
+  "copilot",
+  "opencode",
+]);
 export type ProviderKind = typeof ProviderKind.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
@@ -66,6 +72,13 @@ export const ClaudeModelSelection = Schema.Struct({
 });
 export type ClaudeModelSelection = typeof ClaudeModelSelection.Type;
 
+export const ClaudePtyModelSelection = Schema.Struct({
+  provider: Schema.Literal("claudePty"),
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(ClaudeModelOptions),
+});
+export type ClaudePtyModelSelection = typeof ClaudePtyModelSelection.Type;
+
 export const CopilotModelSelection = Schema.Struct({
   provider: Schema.Literal("copilot"),
   model: TrimmedNonEmptyString,
@@ -83,6 +96,7 @@ export type OpenCodeModelSelection = typeof OpenCodeModelSelection.Type;
 export const ModelSelection = Schema.Union([
   CodexModelSelection,
   ClaudeModelSelection,
+  ClaudePtyModelSelection,
   CopilotModelSelection,
   OpenCodeModelSelection,
 ]);

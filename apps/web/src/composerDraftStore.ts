@@ -406,10 +406,23 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
   );
 }
 
+const ALL_SELECTABLE_PROVIDERS = [
+  "codex",
+  "claudeAgent",
+  "claudePty",
+  "copilot",
+  "opencode",
+] as const satisfies ReadonlyArray<ProviderKind>;
+
+const PROVIDERS_WITH_MODEL_OPTIONS = [
+  "codex",
+  "claudeAgent",
+  "claudePty",
+  "opencode",
+] as const satisfies ReadonlyArray<ProviderKind>;
+
 function normalizeProviderKind(value: unknown): ProviderKind | null {
-  return value === "codex" || value === "claudeAgent" || value === "copilot" || value === "opencode"
-    ? value
-    : null;
+  return ALL_SELECTABLE_PROVIDERS.includes(value as ProviderKind) ? (value as ProviderKind) : null;
 }
 
 function normalizeProviderModelOptions(
@@ -425,6 +438,10 @@ function normalizeProviderModelOptions(
   const claudeCandidate =
     candidate?.claudeAgent && typeof candidate.claudeAgent === "object"
       ? (candidate.claudeAgent as Record<string, unknown>)
+      : null;
+  const claudePtyCandidate =
+    candidate?.claudePty && typeof candidate.claudePty === "object"
+      ? (candidate.claudePty as Record<string, unknown>)
       : null;
   const openCodeCandidate =
     candidate?.opencode && typeof candidate.opencode === "object"
@@ -461,42 +478,36 @@ function normalizeProviderModelOptions(
         }
       : undefined;
 
-  const claudeThinking =
-    claudeCandidate?.thinking === true
-      ? true
-      : claudeCandidate?.thinking === false
-        ? false
+  const parseClaudeOptions = (raw: Record<string, unknown> | null) => {
+    const thinking = raw?.thinking === true ? true : raw?.thinking === false ? false : undefined;
+    const effort: ClaudeCodeEffort | undefined =
+      raw?.effort === "low" ||
+      raw?.effort === "medium" ||
+      raw?.effort === "high" ||
+      raw?.effort === "max" ||
+      raw?.effort === "ultrathink"
+        ? raw.effort
         : undefined;
-  const claudeEffort: ClaudeCodeEffort | undefined =
-    claudeCandidate?.effort === "low" ||
-    claudeCandidate?.effort === "medium" ||
-    claudeCandidate?.effort === "high" ||
-    claudeCandidate?.effort === "max" ||
-    claudeCandidate?.effort === "ultrathink"
-      ? claudeCandidate.effort
-      : undefined;
-  const claudeFastMode =
-    claudeCandidate?.fastMode === true
-      ? true
-      : claudeCandidate?.fastMode === false
-        ? false
+    const fastMode = raw?.fastMode === true ? true : raw?.fastMode === false ? false : undefined;
+    const contextWindow =
+      typeof raw?.contextWindow === "string" && raw.contextWindow.length > 0
+        ? raw.contextWindow
         : undefined;
-  const claudeContextWindow =
-    typeof claudeCandidate?.contextWindow === "string" && claudeCandidate.contextWindow.length > 0
-      ? claudeCandidate.contextWindow
-      : undefined;
-  const claude =
-    claudeThinking !== undefined ||
-    claudeEffort !== undefined ||
-    claudeFastMode !== undefined ||
-    claudeContextWindow !== undefined
+    return thinking !== undefined ||
+      effort !== undefined ||
+      fastMode !== undefined ||
+      contextWindow !== undefined
       ? {
-          ...(claudeThinking !== undefined ? { thinking: claudeThinking } : {}),
-          ...(claudeEffort !== undefined ? { effort: claudeEffort } : {}),
-          ...(claudeFastMode !== undefined ? { fastMode: claudeFastMode } : {}),
-          ...(claudeContextWindow !== undefined ? { contextWindow: claudeContextWindow } : {}),
+          ...(thinking !== undefined ? { thinking } : {}),
+          ...(effort !== undefined ? { effort } : {}),
+          ...(fastMode !== undefined ? { fastMode } : {}),
+          ...(contextWindow !== undefined ? { contextWindow } : {}),
         }
       : undefined;
+  };
+
+  const claude = parseClaudeOptions(claudeCandidate);
+  const claudePty = parseClaudeOptions(claudePtyCandidate);
 
   const copilotCandidate =
     candidate?.copilot && typeof candidate.copilot === "object"
@@ -519,13 +530,13 @@ function normalizeProviderModelOptions(
         }
       : undefined;
 
-  if (!codex && !claude && !copilot && !opencode) {
+  if (!codex && !claude && !claudePty && !copilot && !opencode) {
     return null;
   }
   return {
     ...(codex ? { codex } : {}),
     ...(claude ? { claudeAgent: claude } : {}),
-    ...(copilot ? { copilot } : {}),
+    ...(claudePty ? { claudePty } : {}),
     ...(copilot ? { copilot } : {}),
     ...(opencode ? { opencode } : {}),
   };
@@ -616,7 +627,7 @@ function legacyToModelSelectionByProvider(
   const result: Partial<Record<ProviderKind, ModelSelection>> = {};
   // Add entries from the options bag (for non-active providers)
   if (modelOptions) {
-    for (const provider of ["codex", "claudeAgent", "copilot", "opencode"] as const) {
+    for (const provider of ALL_SELECTABLE_PROVIDERS) {
       const options = modelOptions[provider];
       if (options && Object.keys(options).length > 0) {
         result[provider] = createModelSelection(
@@ -1704,7 +1715,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           }
           const base = existing ?? createEmptyThreadDraft();
           const nextMap = { ...base.modelSelectionByProvider };
-          for (const provider of ["codex", "claudeAgent", "opencode"] as const) {
+          for (const provider of PROVIDERS_WITH_MODEL_OPTIONS) {
             // Only touch providers explicitly present in the input
             if (!normalizedOpts || !(provider in normalizedOpts)) continue;
             const opts = normalizedOpts[provider];

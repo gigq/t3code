@@ -20,6 +20,7 @@ import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/Provi
 import { ProjectionProjectRepositoryLive } from "./persistence/Layers/ProjectionProjects";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
 import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter";
+import { makeClaudePtyAdapterLive } from "./provider/Layers/ClaudePtyAdapter";
 import { CopilotAdapterLive } from "./provider/Layers/CopilotAdapter";
 import { makeOpenCodeAdapterLive } from "./provider/Layers/OpenCodeAdapter";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
@@ -168,6 +169,7 @@ const ProviderLayerLive = Layer.unwrap(
     const claudeAdapterLayer = makeClaudeAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
+    const claudePtyAdapterLayer = makeClaudePtyAdapterLive().pipe(Layer.provide(PtyAdapterLive));
     const copilotAdapterLayer = CopilotAdapterLive.pipe(
       Layer.provide(ProviderReplayTranscriptLive),
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -176,6 +178,7 @@ const ProviderLayerLive = Layer.unwrap(
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),
+      Layer.provide(claudePtyAdapterLayer),
       Layer.provide(copilotAdapterLayer),
       Layer.provide(openCodeAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
