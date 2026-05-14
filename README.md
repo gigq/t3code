@@ -16,6 +16,16 @@ This fork is no longer just Codex/Claude SDK focused. It has a broader provider 
 - **Copilot**: first-class GitHub Copilot CLI provider support through the same provider/session system.
 - **OpenCode**: OpenCode provider support for chat/session usage and for git text-generation routing.
 
+### Codex Bar And Usage Controls
+
+This fork includes a Codex bar/usage control in the sidebar so provider limits are visible without leaving the thread.
+
+- The usage popover reads Codex account limits through `codexbar` and supplements them with `codex status` output when available.
+- It shows the primary Codex usage window, weekly usage, GPT-5.3-Codex-Spark limits, reset text, remaining credits, login/source details, and CLI version.
+- Claude usage is surfaced in the same dropdown as an additional provider, so Claude and Codex subscription state can be checked from one place.
+- The control also shows the current thread context-window usage when that data is available, which helps decide when to compact, fork, or change strategy.
+- The trigger changes tone as limits get low or usage becomes unavailable, making quota/account problems easier to spot before a long-running task stalls.
+
 ### Kairos-Style Auto Mode
 
 This fork includes a Claude Code Kairos-inspired auto mode. The implementation is based on analysis of Claude Code's observed background-agent behavior and then ported into T3 Code's orchestration model rather than being a normal one-shot chat loop.
