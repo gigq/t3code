@@ -43,6 +43,7 @@ const TURN_NO_OUTPUT_WARNING_MS = 30_000;
 const TURN_HARD_TIMEOUT_MS = 20 * 60 * 1_000;
 const TRANSCRIPT_POLL_MS = 1_000;
 const INPUT_READY_DELAY_MS = 2_500;
+const INPUT_READY_SETTLE_MS = 150;
 const RESUME_INPUT_READY_FALLBACK_MS = 20_000;
 const INPUT_ACK_TIMEOUT_MS = 5_000;
 const INPUT_ACK_POLL_MS = 250;
@@ -1263,6 +1264,9 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
     void pollTranscriptForTurn(context, activeTurn);
 
     yield* Effect.promise(() => waitForInputReady(context));
+    if (context.inputReady) {
+      yield* Effect.promise(() => sleep(INPUT_READY_SETTLE_MS));
+    }
     if (activeTurn.completed || context.activeTurn !== activeTurn || context.stopped) {
       return {
         threadId: input.threadId,
