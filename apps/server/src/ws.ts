@@ -75,7 +75,7 @@ import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePat
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner";
 import { providerWorkspaceRootForProject } from "./workspace/Services/RemoteWorkspaces";
 
-type ImportableProviderKind = "codex" | "claudeAgent";
+type ImportableProviderKind = "codex" | "claudeAgent" | "claudePty";
 
 const CLAUDE_SESSION_ID_REGEX =
   /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
@@ -230,11 +230,12 @@ const WsRpcLayer = WsRpcGroup.toLayer(
 
         return yield* importProviderThread({
           projectId: input.projectId,
-          provider: "claudeAgent",
+          provider: "claudePty",
           fallbackTitle: "Imported Claude thread",
           ...(input.title ? { title: input.title } : {}),
           resumeCursor: {
-            resume: normalizedProviderThreadId,
+            kind: "claudePty",
+            sessionId: normalizedProviderThreadId,
           },
         });
       }).pipe(

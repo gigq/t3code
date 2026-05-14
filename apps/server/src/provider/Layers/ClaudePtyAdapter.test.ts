@@ -10,8 +10,10 @@ import { ClaudePtyAdapter } from "../Services/ClaudePtyAdapter.ts";
 import {
   buildClaudeArgs,
   buildClaudePtyLaunch,
+  claudePtyOutputLooksInputReady,
   makeClaudePtyAdapterLive,
   parseClaudeTranscriptAssistantMessages,
+  parseClaudeTranscriptEvents,
 } from "./ClaudePtyAdapter.ts";
 
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
@@ -156,6 +158,25 @@ it("builds remote ssh launch with safe PATH prelude and no glob discovery", () =
   assert.doesNotMatch(remoteCommand, /\*\/bin/);
 });
 
+it("detects Claude TUI input readiness from terminal output", () => {
+  assert.equal(
+    claudePtyOutputLooksInputReady(
+      [
+        "╭─── Claude Code v2.1.141 ───╮",
+        "│ Welcome back Justin! │",
+        "──────────────────── T3 debug ──",
+        "❯ ",
+        "⏵⏵ bypass permissions on (shift+tab to cycle) ● high · /effort",
+      ].join("\n"),
+    ),
+    true,
+  );
+  assert.equal(
+    claudePtyOutputLooksInputReady("Welcome back Justin! Conversation compacted"),
+    false,
+  );
+});
+
 it.effect("starts a PTY session and writes turns via bracketed paste", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {
@@ -229,6 +250,82 @@ it("parses assistant text from Claude JSONL transcripts", () => {
   );
 
   assert.deepEqual(messages, [{ uuid: "assistant-1", text: "hello from disk" }]);
+});
+
+it("parses Claude JSONL tool use and tool result events", () => {
+  const events = parseClaudeTranscriptEvents(
+    [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "assistant-tool",
+        message: {
+          role: "assistant",
+          stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "I'll check." },
+            {
+              type: "tool_use",
+              id: "toolu_123",
+              name: "Bash",
+              input: { command: "git status --short", description: "Check repo state" },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "user-tool-result",
+        toolUseResult: {
+          stdout: " M apps/server/src/provider/Layers/ClaudePtyAdapter.ts\n",
+          stderr: "",
+          interrupted: false,
+        },
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_123",
+              content: " M apps/server/src/provider/Layers/ClaudePtyAdapter.ts\n",
+              is_error: false,
+            },
+          ],
+        },
+      }),
+      "{partial",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(events, [
+    {
+      kind: "assistant_text",
+      key: "assistant-tool:text:0",
+      uuid: "assistant-tool",
+      text: "I'll check.",
+      stopReason: "tool_use",
+    },
+    {
+      kind: "tool_use",
+      key: "assistant-tool:tool:toolu_123",
+      uuid: "assistant-tool",
+      toolUseId: "toolu_123",
+      toolName: "Bash",
+      input: { command: "git status --short", description: "Check repo state" },
+    },
+    {
+      kind: "tool_result",
+      key: "user-tool-result:result:toolu_123:0",
+      uuid: "user-tool-result",
+      toolUseId: "toolu_123",
+      content: " M apps/server/src/provider/Layers/ClaudePtyAdapter.ts\n",
+      isError: false,
+      toolUseResult: {
+        stdout: " M apps/server/src/provider/Layers/ClaudePtyAdapter.ts\n",
+        stderr: "",
+        interrupted: false,
+      },
+    },
+  ]);
 });
 
 it.effect("does not stream raw PTY output as assistant text", () => {

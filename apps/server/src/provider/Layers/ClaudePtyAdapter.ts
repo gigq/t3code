@@ -16,6 +16,7 @@ import {
   RuntimeItemId,
   ThreadId,
   TurnId,
+  type CanonicalItemType,
 } from "@t3tools/contracts";
 import { Effect, Layer, Queue, Stream } from "effect";
 
@@ -32,7 +33,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { ClaudePtyAdapter, type ClaudePtyAdapterShape } from "../Services/ClaudePtyAdapter.ts";
-import { chunkPtyDelta } from "../ptyTerminalText.ts";
+import { chunkPtyDelta, stripAnsiEscapes } from "../ptyTerminalText.ts";
 
 const PROVIDER = "claudePty" as const;
 const REMOTE_CLAUDE_PATH_SETUP =
@@ -42,6 +43,11 @@ const TURN_NO_OUTPUT_WARNING_MS = 30_000;
 const TURN_HARD_TIMEOUT_MS = 20 * 60 * 1_000;
 const TRANSCRIPT_POLL_MS = 1_000;
 const INPUT_READY_DELAY_MS = 2_500;
+const RESUME_INPUT_READY_FALLBACK_MS = 20_000;
+const INPUT_ACK_TIMEOUT_MS = 5_000;
+const INPUT_ACK_POLL_MS = 250;
+const INPUT_READY_OUTPUT_MAX_CHARS = 20_000;
+const TRANSCRIPT_READ_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 40;
 const execFileAsync = promisify(execFile);
@@ -57,7 +63,18 @@ interface ActiveTurnState {
   readonly itemId: RuntimeItemId;
   emittedLength: number;
   outputText: string;
-  seenAssistantUuids: ReadonlySet<string>;
+  transcriptStartLine: number;
+  seenTranscriptKeys: Set<string>;
+  toolItems: Map<
+    string,
+    {
+      readonly itemType: CanonicalItemType;
+      readonly title: string;
+      readonly toolName: string;
+      readonly input: unknown;
+      readonly detail: string | undefined;
+    }
+  >;
   sawOutput: boolean;
   completed: boolean;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -72,6 +89,9 @@ interface ClaudePtySessionContext {
   readonly cwd: string;
   readonly projectLocation: ProviderSessionStartInput["projectLocation"] | undefined;
   readonly inputReadyAtMs: number;
+  inputReady: boolean;
+  inputReadyOutput: string;
+  readonly inputReadyResolvers: Set<() => void>;
   activeTurn: ActiveTurnState | undefined;
   stopped: boolean;
   readonly removeDataListener: () => void;
@@ -211,6 +231,24 @@ function bracketedPaste(value: string): string {
   return `\x1b[200~${value}\x1b[201~\r`;
 }
 
+function plainInput(value: string): string {
+  return `${value}\r`;
+}
+
+export function claudePtyOutputLooksInputReady(value: string): boolean {
+  const compact = stripAnsiEscapes(value)
+    .replace(/\u00a0/g, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+  return (
+    compact.includes("❯") &&
+    (compact.includes("shift+tabtocycle") ||
+      compact.includes("/effort") ||
+      compact.includes("bypasspermissions"))
+  );
+}
+
 function clearTurnTimers(turn: ActiveTurnState): void {
   if (turn.idleTimer) clearTimeout(turn.idleTimer);
   if (turn.noOutputTimer) clearTimeout(turn.noOutputTimer);
@@ -222,6 +260,16 @@ function clearTurnTimers(turn: ActiveTurnState): void {
 
 function notePtyData(context: ClaudePtySessionContext, data: string): void {
   if (context.stopped) return;
+  if (!context.inputReady) {
+    context.inputReadyOutput = `${context.inputReadyOutput}${data}`.slice(
+      -INPUT_READY_OUTPUT_MAX_CHARS,
+    );
+    if (claudePtyOutputLooksInputReady(context.inputReadyOutput)) {
+      context.inputReady = true;
+      for (const resolve of context.inputReadyResolvers) resolve();
+      context.inputReadyResolvers.clear();
+    }
+  }
   const activeTurn = context.activeTurn;
   if (activeTurn && !activeTurn.completed && data.length > 0) activeTurn.sawOutput = true;
 }
@@ -261,49 +309,277 @@ async function findLocalClaudeTranscript(sessionId: string): Promise<string | un
 }
 
 function waitForInputReady(context: ClaudePtySessionContext): Promise<void> {
+  if (context.inputReady) return Promise.resolve();
   const delayMs = context.inputReadyAtMs - Date.now();
   if (delayMs <= 0) return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, delayMs));
+  return new Promise((resolve) => {
+    const resolveReady = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      context.inputReadyResolvers.delete(resolveReady);
+      resolve();
+    }, delayMs);
+    context.inputReadyResolvers.add(resolveReady);
+  });
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function extractClaudeAssistantText(record: unknown): { uuid: string; text: string } | undefined {
-  if (!record || typeof record !== "object" || Array.isArray(record)) return undefined;
-  const entry = record as Record<string, unknown>;
-  if (entry.type !== "assistant" || typeof entry.uuid !== "string") return undefined;
-  const message = entry.message;
-  if (!message || typeof message !== "object" || Array.isArray(message)) return undefined;
-  const content = (message as { content?: unknown }).content;
-  if (!Array.isArray(content)) return undefined;
-  const text = content
-    .flatMap((block) => {
-      if (!block || typeof block !== "object" || Array.isArray(block)) return [];
-      const typed = block as { type?: unknown; text?: unknown };
-      return typed.type === "text" && typeof typed.text === "string" ? [typed.text] : [];
-    })
-    .join("");
-  return text.length > 0 ? { uuid: entry.uuid, text } : undefined;
+interface ClaudeTranscriptAssistantTextEvent {
+  readonly kind: "assistant_text";
+  readonly key: string;
+  readonly uuid: string;
+  readonly text: string;
+  readonly stopReason: string | undefined;
 }
 
-export function parseClaudeTranscriptAssistantMessages(
-  jsonl: string,
-): ReadonlyArray<{ readonly uuid: string; readonly text: string }> {
-  const messages: Array<{ uuid: string; text: string }> = [];
+interface ClaudeTranscriptToolUseEvent {
+  readonly kind: "tool_use";
+  readonly key: string;
+  readonly uuid: string;
+  readonly toolUseId: string;
+  readonly toolName: string;
+  readonly input: unknown;
+}
+
+interface ClaudeTranscriptToolResultEvent {
+  readonly kind: "tool_result";
+  readonly key: string;
+  readonly uuid: string;
+  readonly toolUseId: string;
+  readonly content: unknown;
+  readonly isError: boolean;
+  readonly toolUseResult: unknown;
+}
+
+type ClaudeTranscriptEvent =
+  | ClaudeTranscriptAssistantTextEvent
+  | ClaudeTranscriptToolUseEvent
+  | ClaudeTranscriptToolResultEvent;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function classifyClaudeToolItemType(toolName: string): CanonicalItemType {
+  const normalized = toolName.toLowerCase();
+  if (normalized.includes("agent") || normalized.includes("subagent")) {
+    return "collab_agent_tool_call";
+  }
+  if (
+    normalized.includes("bash") ||
+    normalized.includes("command") ||
+    normalized.includes("shell") ||
+    normalized.includes("terminal")
+  ) {
+    return "command_execution";
+  }
+  if (
+    normalized.includes("edit") ||
+    normalized.includes("write") ||
+    normalized.includes("file") ||
+    normalized.includes("patch") ||
+    normalized.includes("replace") ||
+    normalized.includes("create") ||
+    normalized.includes("delete")
+  ) {
+    return "file_change";
+  }
+  if (normalized.includes("websearch") || normalized.includes("web search")) {
+    return "web_search";
+  }
+  if (normalized.includes("image")) {
+    return "image_view";
+  }
+  if (normalized.includes("mcp")) {
+    return "mcp_tool_call";
+  }
+  return "dynamic_tool_call";
+}
+
+function titleForClaudeTool(itemType: CanonicalItemType): string {
+  switch (itemType) {
+    case "command_execution":
+      return "Ran command";
+    case "file_change":
+      return "File change";
+    case "mcp_tool_call":
+      return "MCP tool call";
+    case "collab_agent_tool_call":
+      return "Subagent task";
+    case "web_search":
+      return "Web search";
+    case "image_view":
+      return "Image view";
+    case "dynamic_tool_call":
+      return "Tool call";
+    default:
+      return "Tool";
+  }
+}
+
+function summarizeClaudeToolRequest(toolName: string, input: unknown): string | undefined {
+  const inputRecord = asRecord(input);
+  const commandValue = inputRecord?.command ?? inputRecord?.cmd;
+  if (typeof commandValue === "string" && commandValue.trim().length > 0) {
+    return `${toolName}: ${commandValue.trim().slice(0, 400)}`;
+  }
+  const serialized = JSON.stringify(input);
+  if (!serialized) return toolName;
+  return serialized.length <= 400
+    ? `${toolName}: ${serialized}`
+    : `${toolName}: ${serialized.slice(0, 397)}...`;
+}
+
+function summarizeClaudeToolResult(content: unknown): string | undefined {
+  if (typeof content === "string") return content.slice(0, 2_000);
+  if (Array.isArray(content)) {
+    const text = content
+      .flatMap((entry) => {
+        const record = asRecord(entry);
+        return record?.type === "text" && typeof record.text === "string" ? [record.text] : [];
+      })
+      .join("\n");
+    if (text.trim().length > 0) return text.slice(0, 2_000);
+  }
+  const serialized = JSON.stringify(content);
+  return serialized ? serialized.slice(0, 2_000) : undefined;
+}
+
+function extractClaudeTranscriptEvents(record: unknown): ReadonlyArray<ClaudeTranscriptEvent> {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return [];
+  const entry = record as Record<string, unknown>;
+  if (typeof entry.uuid !== "string") return [];
+  const uuid = entry.uuid;
+  const message = entry.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) return [];
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+
+  if (entry.type === "assistant") {
+    const stopReason =
+      typeof (message as { stop_reason?: unknown }).stop_reason === "string"
+        ? (message as { stop_reason: string }).stop_reason
+        : undefined;
+    return content.flatMap((block, index): ClaudeTranscriptEvent[] => {
+      const typed = asRecord(block);
+      if (!typed) return [];
+      if (typed.type === "text" && typeof typed.text === "string" && typed.text.length > 0) {
+        return [
+          {
+            kind: "assistant_text",
+            key: `${uuid}:text:${index}`,
+            uuid,
+            text: typed.text,
+            stopReason,
+          },
+        ];
+      }
+      if (
+        typed.type === "tool_use" &&
+        typeof typed.id === "string" &&
+        typeof typed.name === "string"
+      ) {
+        return [
+          {
+            kind: "tool_use",
+            key: `${uuid}:tool:${typed.id}`,
+            uuid,
+            toolUseId: typed.id,
+            toolName: typed.name,
+            input: typed.input,
+          },
+        ];
+      }
+      return [];
+    });
+  }
+
+  if (entry.type === "user") {
+    return content.flatMap((block, index): ClaudeTranscriptEvent[] => {
+      const typed = asRecord(block);
+      if (!typed || typed.type !== "tool_result" || typeof typed.tool_use_id !== "string") {
+        return [];
+      }
+      return [
+        {
+          kind: "tool_result",
+          key: `${uuid}:result:${typed.tool_use_id}:${index}`,
+          uuid,
+          toolUseId: typed.tool_use_id,
+          content: typed.content,
+          isError: typed.is_error === true,
+          toolUseResult: entry.toolUseResult,
+        },
+      ];
+    });
+  }
+
+  return [];
+}
+
+function transcriptRecordContainsUserPrompt(record: unknown, prompt: string): boolean {
+  const entry = asRecord(record);
+  if (!entry) return false;
+  if (entry.type === "last-prompt" && entry.lastPrompt === prompt) return true;
+  if (entry.type !== "user") return false;
+  const message = asRecord(entry.message);
+  if (!message) return false;
+  const content = message.content;
+  if (typeof content === "string") return content === prompt;
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => {
+    if (typeof block === "string") return block === prompt;
+    const typed = asRecord(block);
+    return typed?.type === "text" && typed.text === prompt;
+  });
+}
+
+function claudeTranscriptContainsUserPrompt(jsonl: string, prompt: string): boolean {
+  for (const line of jsonl.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      if (transcriptRecordContainsUserPrompt(JSON.parse(trimmed) as unknown, prompt)) {
+        return true;
+      }
+    } catch {
+      // Claude can append while we read; ignore partial trailing JSON.
+    }
+  }
+  return false;
+}
+
+export function parseClaudeTranscriptEvents(jsonl: string): ReadonlyArray<ClaudeTranscriptEvent> {
+  const events: ClaudeTranscriptEvent[] = [];
   for (const line of jsonl.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
       const parsed = JSON.parse(trimmed) as unknown;
-      const message = extractClaudeAssistantText(parsed);
-      if (message) messages.push(message);
+      events.push(...extractClaudeTranscriptEvents(parsed));
     } catch {
       // Claude can append while we read; ignore partial trailing JSON.
     }
   }
-  return messages;
+  return events;
+}
+
+export function parseClaudeTranscriptAssistantMessages(
+  jsonl: string,
+): ReadonlyArray<{ readonly uuid: string; readonly text: string }> {
+  const grouped = new Map<string, string>();
+  for (const event of parseClaudeTranscriptEvents(jsonl)) {
+    if (event.kind !== "assistant_text") continue;
+    grouped.set(event.uuid, `${grouped.get(event.uuid) ?? ""}${event.text}`);
+  }
+  return Array.from(grouped, ([uuid, text]) => ({ uuid, text }));
 }
 
 const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
@@ -318,49 +594,142 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
     runFork(Queue.offer(events, event));
   };
 
-  const readClaudeTranscript = async (context: ClaudePtySessionContext): Promise<string> => {
+  const resolveLocalClaudeTranscriptPath = async (
+    context: ClaudePtySessionContext,
+  ): Promise<string | undefined> => {
+    const exactPath = claudeTranscriptPath(context.cwd, context.sessionId);
+    try {
+      await readFile(exactPath, "utf8");
+      return exactPath;
+    } catch {
+      return await findLocalClaudeTranscript(context.sessionId);
+    }
+  };
+
+  const remoteTranscriptScript = (
+    context: ClaudePtySessionContext,
+    commandForFile: (fileExpression: string) => string,
+  ): string => {
     const sshProject =
       context.projectLocation?.kind === "ssh" ? context.projectLocation : undefined;
-    if (!sshProject) {
-      const exactPath = claudeTranscriptPath(context.cwd, context.sessionId);
-      try {
-        return await readFile(exactPath, "utf8");
-      } catch (error) {
-        const fallbackPath = await findLocalClaudeTranscript(context.sessionId);
-        if (fallbackPath) return await readFile(fallbackPath, "utf8");
-        throw error;
-      }
-    }
-
+    if (!sshProject) return "";
     const remotePath = remoteClaudeTranscriptPath(sshProject.remotePath, context.sessionId);
-    const remoteScript = `${REMOTE_CLAUDE_PATH_SETUP}; if [ -f ${shellQuote(
+    return `${REMOTE_CLAUDE_PATH_SETUP}; file=${shellQuote(
       remotePath,
-    )} ]; then cat ${shellQuote(
-      remotePath,
+    )}; if [ -f "$file" ]; then ${commandForFile(
+      '"$file"',
     )}; else found=$(find "$HOME/.claude/projects" -name ${shellQuote(
       `${context.sessionId}.jsonl`,
-    )} -type f -print -quit 2>/dev/null); [ -n "$found" ] && cat "$found" || true; fi`;
-    const remoteCommand = ["exec", "/bin/sh", "-lc", shellQuote(remoteScript)].join(" ");
-    const { stdout } = await execFileAsync("ssh", [
-      "-T",
-      ...(sshProject.port !== undefined ? ["-p", String(sshProject.port)] : []),
-      sshProject.host,
-      remoteCommand,
-    ]);
+    )} -type f -print -quit 2>/dev/null); [ -n "$found" ] && ${commandForFile(
+      '"$found"',
+    )} || true; fi`;
+  };
+
+  const runRemoteTranscriptCommand = async (
+    context: ClaudePtySessionContext,
+    script: string,
+  ): Promise<string> => {
+    const sshProject =
+      context.projectLocation?.kind === "ssh" ? context.projectLocation : undefined;
+    if (!sshProject) return "";
+    const remoteCommand = ["exec", "/bin/sh", "-lc", shellQuote(script)].join(" ");
+    const { stdout } = await execFileAsync(
+      "ssh",
+      [
+        "-T",
+        ...(sshProject.port !== undefined ? ["-p", String(sshProject.port)] : []),
+        sshProject.host,
+        remoteCommand,
+      ],
+      { maxBuffer: TRANSCRIPT_READ_MAX_BUFFER_BYTES },
+    );
     return stdout;
   };
 
-  const readSeenAssistantUuids = async (
+  const readClaudeTranscriptLineCount = async (
     context: ClaudePtySessionContext,
-  ): Promise<ReadonlySet<string>> => {
-    try {
-      const transcript = await readClaudeTranscript(context);
-      return new Set(
-        parseClaudeTranscriptAssistantMessages(transcript).map((message) => message.uuid),
-      );
-    } catch {
-      return new Set();
+  ): Promise<number> => {
+    const sshProject =
+      context.projectLocation?.kind === "ssh" ? context.projectLocation : undefined;
+    if (!sshProject) {
+      const path = await resolveLocalClaudeTranscriptPath(context);
+      if (!path) return 0;
+      const { stdout } = await execFileAsync("wc", ["-l", path], { maxBuffer: 1024 * 1024 });
+      return Number.parseInt(stdout.trim().split(/\s+/)[0] ?? "0", 10) || 0;
     }
+    const stdout = await runRemoteTranscriptCommand(
+      context,
+      remoteTranscriptScript(context, (file) => `wc -l < ${file}`),
+    );
+    return Number.parseInt(stdout.trim(), 10) || 0;
+  };
+
+  const readClaudeTranscriptSinceLine = async (
+    context: ClaudePtySessionContext,
+    startLine: number,
+  ): Promise<string> => {
+    const firstLine = Math.max(1, Math.floor(startLine) + 1);
+    const sshProject =
+      context.projectLocation?.kind === "ssh" ? context.projectLocation : undefined;
+    if (!sshProject) {
+      const path = await resolveLocalClaudeTranscriptPath(context);
+      if (!path) return "";
+      const { stdout } = await execFileAsync("tail", ["-n", `+${String(firstLine)}`, path], {
+        maxBuffer: TRANSCRIPT_READ_MAX_BUFFER_BYTES,
+      });
+      return stdout;
+    }
+    return await runRemoteTranscriptCommand(
+      context,
+      remoteTranscriptScript(context, (file) => `tail -n +${String(firstLine)} ${file}`),
+    );
+  };
+
+  const waitForPromptAcknowledged = async (
+    context: ClaudePtySessionContext,
+    prompt: string,
+    activeTurn: ActiveTurnState,
+  ): Promise<boolean> => {
+    const deadline = Date.now() + INPUT_ACK_TIMEOUT_MS;
+    while (
+      Date.now() < deadline &&
+      !context.stopped &&
+      context.activeTurn === activeTurn &&
+      !activeTurn.completed
+    ) {
+      try {
+        const transcript = await readClaudeTranscriptSinceLine(
+          context,
+          activeTurn.transcriptStartLine,
+        );
+        if (claudeTranscriptContainsUserPrompt(transcript, prompt)) {
+          return true;
+        }
+      } catch {
+        // The transcript file can be absent briefly on brand-new sessions.
+      }
+      await sleep(INPUT_ACK_POLL_MS);
+    }
+    return false;
+  };
+
+  const retryPromptWithPlainInputIfNeeded = async (
+    context: ClaudePtySessionContext,
+    activeTurn: ActiveTurnState,
+    prompt: string,
+  ): Promise<void> => {
+    if (await waitForPromptAcknowledged(context, prompt, activeTurn)) return;
+    if (context.stopped || context.activeTurn !== activeTurn || activeTurn.completed) return;
+    context.pty.write(plainInput(prompt));
+  };
+
+  const writePromptToPty = (
+    context: ClaudePtySessionContext,
+    activeTurn: ActiveTurnState,
+    prompt: string,
+  ): void => {
+    context.pty.write(bracketedPaste(prompt));
+    void retryPromptWithPlainInputIfNeeded(context, activeTurn, prompt);
   };
 
   const completeTurn = (context: ClaudePtySessionContext, reason: "idle" | "hard-timeout") => {
@@ -427,8 +796,10 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
     context: ClaudePtySessionContext,
     activeTurn: ActiveTurnState,
     text: string,
+    options: { readonly complete: boolean } = { complete: true },
   ) => {
-    activeTurn.outputText = text;
+    activeTurn.outputText =
+      activeTurn.outputText.length > 0 ? `${activeTurn.outputText}\n${text}` : text;
     activeTurn.sawOutput = true;
     for (const delta of chunkPtyDelta(text)) {
       offerEvent({
@@ -446,7 +817,86 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
       });
       activeTurn.emittedLength += delta.length;
     }
-    scheduleIdleCompletion(context);
+    if (options.complete) scheduleIdleCompletion(context);
+  };
+
+  const processTranscriptEventForTurn = (
+    context: ClaudePtySessionContext,
+    activeTurn: ActiveTurnState,
+    event: ClaudeTranscriptEvent,
+  ): boolean => {
+    if (activeTurn.seenTranscriptKeys.has(event.key)) return false;
+    activeTurn.seenTranscriptKeys.add(event.key);
+
+    if (event.kind === "assistant_text") {
+      emitTranscriptMessageForTurn(context, activeTurn, event.text, {
+        complete: event.stopReason !== "tool_use",
+      });
+      return event.stopReason !== "tool_use";
+    }
+
+    if (event.kind === "tool_use") {
+      const itemType = classifyClaudeToolItemType(event.toolName);
+      const title = titleForClaudeTool(itemType);
+      const detail = summarizeClaudeToolRequest(event.toolName, event.input);
+      activeTurn.sawOutput = true;
+      activeTurn.toolItems.set(event.toolUseId, {
+        itemType,
+        title,
+        toolName: event.toolName,
+        input: event.input,
+        detail,
+      });
+      offerEvent({
+        type: "item.started",
+        eventId: eventId(),
+        provider: PROVIDER,
+        createdAt: nowIso(),
+        threadId: context.session.threadId,
+        turnId: activeTurn.turnId,
+        itemId: RuntimeItemId.makeUnsafe(event.toolUseId),
+        payload: {
+          itemType,
+          status: "inProgress",
+          title,
+          ...(detail ? { detail } : {}),
+          data: {
+            toolName: event.toolName,
+            input: event.input,
+          },
+        },
+      });
+      return false;
+    }
+
+    const tool = activeTurn.toolItems.get(event.toolUseId);
+    const itemType = tool?.itemType ?? "dynamic_tool_call";
+    const title = tool?.title ?? titleForClaudeTool(itemType);
+    const detail = summarizeClaudeToolResult(event.content);
+    activeTurn.sawOutput = true;
+    activeTurn.toolItems.delete(event.toolUseId);
+    offerEvent({
+      type: "item.completed",
+      eventId: eventId(),
+      provider: PROVIDER,
+      createdAt: nowIso(),
+      threadId: context.session.threadId,
+      turnId: activeTurn.turnId,
+      itemId: RuntimeItemId.makeUnsafe(event.toolUseId),
+      payload: {
+        itemType,
+        status: event.isError ? "failed" : "completed",
+        title,
+        ...(detail ? { detail } : {}),
+        data: {
+          toolUseId: event.toolUseId,
+          ...(tool ? { toolName: tool.toolName, input: tool.input } : {}),
+          content: event.content,
+          toolUseResult: event.toolUseResult,
+        },
+      },
+    });
+    return false;
   };
 
   const pollTranscriptForTurn = async (
@@ -455,12 +905,17 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
   ) => {
     while (!context.stopped && context.activeTurn === activeTurn && !activeTurn.completed) {
       try {
-        const transcript = await readClaudeTranscript(context);
-        const nextMessage = parseClaudeTranscriptAssistantMessages(transcript).find(
-          (message) => !activeTurn.seenAssistantUuids.has(message.uuid),
+        const transcript = await readClaudeTranscriptSinceLine(
+          context,
+          activeTurn.transcriptStartLine,
         );
-        if (nextMessage) {
-          emitTranscriptMessageForTurn(context, activeTurn, nextMessage.text);
+        let shouldStopPolling = false;
+        for (const event of parseClaudeTranscriptEvents(transcript)) {
+          if (processTranscriptEventForTurn(context, activeTurn, event)) {
+            shouldStopPolling = true;
+          }
+        }
+        if (shouldStopPolling) {
           return;
         }
       } catch {
@@ -643,7 +1098,11 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
         sessionId,
         cwd: input.projectLocation?.kind === "ssh" ? input.projectLocation.remotePath : launch.cwd,
         projectLocation: input.projectLocation,
-        inputReadyAtMs: Date.now() + INPUT_READY_DELAY_MS,
+        inputReadyAtMs:
+          Date.now() + (isResuming ? RESUME_INPUT_READY_FALLBACK_MS : INPUT_READY_DELAY_MS),
+        inputReady: false,
+        inputReadyOutput: "",
+        inputReadyResolvers: new Set(),
         activeTurn: undefined,
         stopped: false,
         removeDataListener,
@@ -732,14 +1191,18 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
     const startedAt = nowIso();
     const nextTurnId = turnId();
     const nextItemId = itemId();
-    const seenAssistantUuids = yield* Effect.promise(() => readSeenAssistantUuids(context));
+    const transcriptStartLine = yield* Effect.promise(() =>
+      readClaudeTranscriptLineCount(context).catch(() => 0),
+    );
     const activeTurn: ActiveTurnState = {
       turnId: nextTurnId,
       startedAt,
       itemId: nextItemId,
       emittedLength: 0,
       outputText: "",
-      seenAssistantUuids,
+      transcriptStartLine,
+      seenTranscriptKeys: new Set(),
+      toolItems: new Map(),
       sawOutput: false,
       completed: false,
       idleTimer: undefined,
@@ -807,7 +1270,7 @@ const makeClaudePtyAdapter = Effect.fn("makeClaudePtyAdapter")(function* () {
         resumeCursor: claudePtyResumeCursor(context.sessionId),
       } satisfies ProviderTurnStartResult;
     }
-    context.pty.write(bracketedPaste(text));
+    writePromptToPty(context, activeTurn, text);
     if (input.attachments && input.attachments.length > 0) {
       offerEvent({
         type: "runtime.warning",
